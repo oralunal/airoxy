@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\ProxyController;
+use App\Http\Middleware\AuthenticateToken;
 use Illuminate\Support\Facades\Route;
 
-// Proxy route will be added in Task 9
+Route::post('/v1/messages', [ProxyController::class, 'handle'])
+    ->middleware(AuthenticateToken::class);
