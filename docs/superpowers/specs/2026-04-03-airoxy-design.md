@@ -44,14 +44,14 @@ Client                    Airoxy                         Anthropic
 
 **Incoming → Outgoing:**
 - `x-api-key: <airoxy_token>` → removed, used for auth; replaced with `x-api-key: <selected_anthropic_key>`
-- `anthropic-version` → forwarded if present; default `2023-06-01` added if absent
+- `anthropic-version` → forwarded if present; default from `config('airoxy.anthropic_version')` added if absent (initially `2023-06-01`)
 - `anthropic-beta`, `content-type`, and other Anthropic headers → forwarded as-is
 
 **Response:** HTTP status code, body, and Anthropic response headers (especially rate-limit headers) forwarded as-is to client.
 
 ### 1.3 Body Handling
 
-Request body is **never parsed or modified** for proxying purposes. Only `model` and `stream` fields are read for logging. The entire body is forwarded byte-for-byte. All Anthropic parameters (model, messages, tools, thinking, metadata, container, etc.) pass through transparently.
+The raw request body (`request()->getContent()`) is forwarded **verbatim** to Anthropic — no re-serialization. A separate JSON decode of the raw body extracts only `model` and `stream` for logging/routing. The forwarded payload uses `'body' => $rawBody` with Guzzle (not `'json'`), preserving key ordering, whitespace, and numeric precision byte-for-byte. All Anthropic parameters pass through transparently.
 
 ---
 
@@ -181,9 +181,11 @@ airoxy/
 | error_message | text, nullable | |
 | duration_ms | integer | |
 | requested_at | timestamp | |
-| created_at | timestamp | |
+| created_at | timestamp | Explicit `$table->timestamp()`, no `updated_at` (append-only) |
 
 **Retention:** Rows older than 3 days are purged daily by a scheduled task, after aggregation.
+
+**Index:** `requested_at` is indexed for date-range queries and purge operations.
 
 ### 3.4 `daily_stats`
 
@@ -208,11 +210,52 @@ airoxy/
 
 ---
 
-## 4. Streaming SSE Proxy
+## 4. Proxy Flow (Non-Streaming & Streaming)
+
+### 4.1 Two-Phase Approach
+
+`ProxyService` uses a two-phase approach to correctly handle both streaming and non-streaming, and to forward the correct HTTP status code:
+
+```
+Phase 1: Make upstream request to Anthropic
+  ├── stream=true  → Guzzle with 'stream' => true (deferred body read)
+  └── stream=false → Guzzle standard request (full response buffered)
+
+Phase 2: Inspect upstream response status
+  ├── 4xx/5xx error → Return error response directly (correct status code, body as-is)
+  └── 2xx success
+       ├── stream=true  → Return StreamedResponse, forward chunks
+       └── stream=false → Return full response (status, body, headers as-is)
+```
+
+This ensures the client always receives the correct HTTP status code from Anthropic, even for streaming requests.
+
+### 4.2 Non-Streaming Proxy
+
+When `stream` is `false` or absent:
+
+```php
+$response = Http::withHeaders($proxyHeaders)
+    ->withBody($rawBody, 'application/json')
+    ->withOptions(['connect_timeout' => 10, 'timeout' => 300])
+    ->post('https://api.anthropic.com/v1/messages');
+
+// Extract usage from JSON response for logging
+$responseBody = $response->body();
+$responseData = json_decode($responseBody, true);
+// Log: input_tokens, output_tokens, cache tokens from $responseData['usage']
+
+return response($responseBody, $response->status())
+    ->withHeaders($this->forwardHeaders($response));
+```
+
+Note: `withBody($rawBody, 'application/json')` sends the raw bytes without re-serialization.
+
+### 4.3 Streaming SSE Proxy
 
 This is the most critical component. The proxy must forward SSE chunks in real-time without any buffering.
 
-### 4.1 Flow
+#### 4.3.1 Flow
 
 ```
 Anthropic SSE stream
@@ -222,22 +265,31 @@ Anthropic SSE stream
     └── 3. Parse for token usage (non-blocking, after echo)
 ```
 
-### 4.2 Implementation Approach
+#### 4.3.2 Implementation Approach
 
-Using Laravel's `StreamedResponse` within Octane:
+Using Laravel's HTTP client (Octane-aware, avoids Guzzle memory leaks):
 
 ```php
-return response()->stream(function () use ($proxyHeaders, $requestBody, &$logData) {
-    $client = new \GuzzleHttp\Client();
-    $response = $client->post('https://api.anthropic.com/v1/messages', [
-        'headers' => $proxyHeaders,
-        'json' => $requestBody,
+// Phase 1: Make the upstream request
+$upstream = Http::withHeaders($proxyHeaders)
+    ->withBody($rawBody, 'application/json')
+    ->withOptions([
         'stream' => true,
         'read_timeout' => 300,
         'connect_timeout' => 10,
-    ]);
+    ])
+    ->post('https://api.anthropic.com/v1/messages');
 
-    $body = $response->getBody();
+// Phase 2: Check status before streaming
+if ($upstream->status() !== 200) {
+    // Error before stream started — forward as regular response
+    return response($upstream->body(), $upstream->status())
+        ->withHeaders($this->forwardHeaders($upstream));
+}
+
+// Phase 2b: Stream success response
+return response()->stream(function () use ($upstream, &$logData) {
+    $body = $upstream->toPsrResponse()->getBody();
     while (!$body->eof()) {
         $chunk = $body->read(8192);
         if ($chunk !== '' && $chunk !== false) {
@@ -254,20 +306,20 @@ return response()->stream(function () use ($proxyHeaders, $requestBody, &$logDat
 ]);
 ```
 
-### 4.3 SSE Token Parsing
+### 4.4 SSE Token Parsing
 
 - `message_start` → extract `message.usage.input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`
 - `message_delta` → extract `usage.output_tokens`
 - Parser maintains an incomplete-event buffer for chunks that split across SSE event boundaries
 - Parsing never blocks chunk forwarding
 
-### 4.4 Error Handling
+### 4.5 Error Handling
 
 | Scenario | Action |
 |----------|--------|
+| Anthropic returns 4xx/5xx before stream starts | Forward error response with correct status code and body, log |
 | Anthropic connection drops mid-stream | Log with partial data, set error_message |
 | Client disconnects mid-stream | Detect via `connection_aborted()`, close Anthropic connection, log partial data |
-| Anthropic returns 4xx/5xx before stream starts | Forward error response to client, log |
 | API key gets 429/529 | Retry with next key; if all exhausted, forward error |
 
 ---
@@ -277,14 +329,15 @@ return response()->stream(function () use ($proxyHeaders, $requestBody, &$logDat
 ### 5.1 Selection Algorithm
 
 ```
-1. Query active keys ordered by last_used_at ASC (nulls first)
-2. Select first key
-3. Atomically update last_used_at = now() (prevents race conditions)
-4. If request fails with 429/529, mark key as temporarily skipped, try next
-5. If all keys exhausted, return last error to client
+1. Begin DB::transaction()
+2. Query active keys ordered by last_used_at ASC (nulls first), LIMIT 1
+3. Update selected key's last_used_at = now()
+4. Commit transaction
+5. If request fails with 429/529, retry with next key (exclude failed key IDs)
+6. If all keys exhausted, return last error to client
 ```
 
-Atomic selection uses `UPDATE ... WHERE id = ? AND last_used_at = ?` to prevent race conditions under concurrent requests.
+Uses `DB::transaction()` for atomicity. SQLite serializes write transactions, so concurrent requests naturally take turns. The `usage_order` column serves as tiebreaker when multiple keys have the same `last_used_at` (e.g. all null on first use): keys are ordered by `last_used_at ASC, usage_order ASC`.
 
 ---
 
@@ -300,6 +353,10 @@ Request arrives
   → Not found? → 401
   → Token expired (token_expires_at < now)? → 401
   → Valid → proceed, update last_used_at
+
+401 response body mimics Anthropic's error format for client compatibility:
+```json
+{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}
 ```
 
 ### 6.2 Token Refresh
@@ -329,7 +386,9 @@ Scans:
 1. `/root/.claude/.credentials.json`
 2. `/home/*/.claude/.credentials.json`
 
-Reads `claudeAiOauth.accessToken`, `claudeAiOauth.refreshToken`, `claudeAiOauth.expiresAt` (millisecond Unix timestamp). Deduplicates by `accessToken`. Names derived from Unix username in the path.
+Reads `claudeAiOauth.accessToken`, `claudeAiOauth.refreshToken`, `claudeAiOauth.expiresAt` (millisecond Unix timestamp). Names derived from Unix username in the path.
+
+**Deduplication:** Matches by `refresh_token` (stable across refreshes). If found, updates `token` and `token_expires_at` with latest values. If not found, creates new record. This handles the case where a token was already imported but has since been refreshed locally by Claude Code.
 
 ---
 
@@ -354,9 +413,9 @@ Unknown models fall back to `default` pricing.
 
 Two tasks run daily (via Laravel scheduler):
 
-1. **Aggregate** (runs first): For each completed day, group `request_logs` by `(date, access_token_id, model)` and insert/update into `daily_stats`. Also creates rollup rows with null token/model for totals.
+1. **Aggregate** (runs first, at 01:00 UTC): For each completed day (`date < today`), group `request_logs` by `(date, access_token_id, model)` and insert/update into `daily_stats`. Also creates rollup rows with null token/model for totals. Only aggregates days not yet present in `daily_stats`.
 
-2. **Purge** (runs after aggregate): Delete `request_logs` where `created_at < now() - 3 days`.
+2. **Purge** (runs after aggregate, at 01:30 UTC): Delete `request_logs` where `requested_at < now() - 3 days`.
 
 ### 8.2 Stats Command Behavior
 
@@ -436,14 +495,14 @@ curl -fsSL https://raw.githubusercontent.com/oralunal/airoxy/main/install.sh | b
 ```bash
 #!/bin/bash
 AIROXY_PATH="/var/www/airoxy"
-cd "$AIROXY_PATH" && php artisan "$@"
+cd "$AIROXY_PATH" && php artisan "airoxy:$1" "${@:2}"
 ```
 
-Mapped so `airoxy serve` runs `php artisan airoxy:serve`, etc. The command prefix mapping:
+This prepends `airoxy:` to the first argument, so:
 - `airoxy serve` → `php artisan airoxy:serve`
-- `airoxy api-key:*` → `php artisan airoxy:api-key:*`
-- `airoxy token:*` → `php artisan airoxy:token:*`
-- `airoxy logs` → `php artisan airoxy:logs`
+- `airoxy api-key:add KEY` → `php artisan airoxy:api-key:add KEY`
+- `airoxy token:list` → `php artisan airoxy:token:list`
+- `airoxy logs --today` → `php artisan airoxy:logs --today`
 - `airoxy stats` → `php artisan airoxy:stats`
 
 ---
@@ -455,7 +514,10 @@ Contains:
 - **OAuth2 constants:** endpoint URL, client_id, scope
 - **Server defaults:** host, port (from .env)
 - **Token refresh interval:** from .env (default 360 minutes)
-- **Log retention days:** 3
+- **Log retention days:** 3 (from .env)
+- **Anthropic version default:** `2023-06-01` (configurable)
+
+**Dependencies note:** `laravel/octane` must be added to `composer.json` `require` section. `composer.json` PHP requirement must be updated to `^8.5`.
 
 ---
 
@@ -469,7 +531,7 @@ command=php /var/www/airoxy/artisan octane:start --server=frankenphp --host=0.0.
 autostart=true
 autorestart=true
 user=www-data
-stopwaitsecs=3600
+stopwaitsecs=30
 
 [program:airoxy-scheduler]
 command=/bin/bash -c "while true; do php /var/www/airoxy/artisan schedule:run --no-interaction >> /dev/null 2>&1; sleep 60; done"
@@ -483,7 +545,8 @@ user=www-data
 ## 13. Security
 
 - API keys encrypted at rest using Laravel's `encrypted` cast
-- Access tokens stored in plaintext (needed for OAuth2 refresh) but masked in all CLI output and logs
+- `access_tokens.token` stored in plaintext (not hashed) because the refresh mechanism replaces it in-place and it needs to be sent to Anthropic as a bearer token. Masked in all CLI output and logs (first 8 + last 4 chars visible)
+- `access_tokens.refresh_token` stored in plaintext (required for OAuth2 refresh calls)
 - Invalid token requests are not logged (spam protection)
 - `x-api-key` header is required on all proxy requests
 - `install.sh` sets proper file ownership (`www-data`) and permissions
@@ -513,11 +576,11 @@ DB_CONNECTION=sqlite
 
 ## 15. Route Definition
 
-Single route, no middleware stack except custom token auth:
+Two routes, no middleware stack except custom token auth on the proxy:
 
 ```
-POST /v1/messages → ProxyController@handle
-  Middleware: AuthenticateToken
+GET  /health       → returns {"status": "ok"} (no auth, for monitoring/load balancers)
+POST /v1/messages  → ProxyController@handle (Middleware: AuthenticateToken)
 ```
 
-No CSRF, no session, no cookies. API-only route.
+No CSRF, no session, no cookies. API-only routes.
