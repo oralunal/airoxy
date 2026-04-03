@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'token', 'refresh_token', 'token_expires_at', 'is_active', 'last_used_at', 'refresh_fail_count'])]
+#[Fillable(['name', 'token', 'refresh_token', 'token_expires_at', 'is_active', 'last_used_at', 'refresh_fail_count', 'usage_order'])]
 class AccessToken extends Model
 {
     protected function casts(): array

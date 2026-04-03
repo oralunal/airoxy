@@ -58,7 +58,9 @@ class TokenRefresher
      */
     public function refreshAll(): array
     {
-        $tokens = AccessToken::where('is_active', true)->get();
+        $tokens = AccessToken::where('is_active', true)
+            ->whereNotNull('token_expires_at')
+            ->get();
         $refreshed = 0;
         $failed = 0;
 

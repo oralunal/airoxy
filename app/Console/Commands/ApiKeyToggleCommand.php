@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use Illuminate\Console\Command;
 
 class ApiKeyToggleCommand extends Command
@@ -13,7 +13,7 @@ class ApiKeyToggleCommand extends Command
 
     public function handle(): int
     {
-        $key = AnthropicApiKey::find($this->argument('id'));
+        $key = ApiKey::find($this->argument('id'));
 
         if (! $key) {
             $this->error('API key not found.');

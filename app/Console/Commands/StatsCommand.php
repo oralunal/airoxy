@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AccessToken;
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use App\Models\DailyStat;
 use App\Models\RequestLog;
 use Illuminate\Console\Command;
@@ -82,7 +82,7 @@ class StatsCommand extends Command
         $this->line('  Cache Read Tokens        : '.number_format($totalCacheRead));
         $this->line('  Estimated Total Cost     : $'.number_format($totalCost, 2));
         $this->line(str_repeat('-', 50));
-        $this->line('  Active API Keys          : '.AnthropicApiKey::where('is_active', true)->count());
+        $this->line('  Active API Keys          : '.ApiKey::where('is_active', true)->count());
         $this->line('  Active Tokens            : '.AccessToken::where('is_active', true)->count());
         $this->line(str_repeat('=', 50));
         $this->line('');

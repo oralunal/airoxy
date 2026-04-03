@@ -44,6 +44,6 @@ class RequestLog extends Model
 
     public function apiKey(): BelongsTo
     {
-        return $this->belongsTo(AnthropicApiKey::class, 'api_key_id');
+        return $this->belongsTo(ApiKey::class);
     }
 }

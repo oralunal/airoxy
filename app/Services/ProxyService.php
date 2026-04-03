@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\AccessToken;
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use App\Models\RequestLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -14,11 +14,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class ProxyService
 {
     public function __construct(
-        private ApiKeyRotator $apiKeyRotator,
+        private AccessTokenRotator $accessTokenRotator,
         private CostCalculator $costCalculator,
     ) {}
 
-    public function handle(Request $request, AccessToken $accessToken): Response
+    public function handle(Request $request, ApiKey $apiKey): Response
     {
         $rawBody = $request->getContent();
         $parsed = json_decode($rawBody, true) ?: [];
@@ -26,33 +26,33 @@ class ProxyService
         $isStream = $parsed['stream'] ?? false;
 
         $requestedAt = now();
-        $excludeKeyIds = [];
+        $excludeTokenIds = [];
         $lastError = null;
 
         while (true) {
-            $apiKey = $this->apiKeyRotator->selectNext($excludeKeyIds);
+            $accessToken = $this->accessTokenRotator->selectNext($excludeTokenIds);
 
-            if (! $apiKey) {
+            if (! $accessToken) {
                 if ($lastError) {
                     return $lastError;
                 }
 
                 return response()->json([
                     'type' => 'error',
-                    'error' => ['type' => 'api_error', 'message' => 'No API keys available'],
+                    'error' => ['type' => 'api_error', 'message' => 'No access tokens available'],
                 ], 503);
             }
 
-            $proxyHeaders = $this->buildProxyHeaders($request, $apiKey->api_key);
+            $proxyHeaders = $this->buildProxyHeaders($request, $accessToken->token);
 
             if ($isStream) {
-                $result = $this->handleStreamingRequest($rawBody, $proxyHeaders, $accessToken, $apiKey, $model, $requestedAt);
+                $result = $this->handleStreamingRequest($rawBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
             } else {
-                $result = $this->handleNonStreamingRequest($rawBody, $proxyHeaders, $accessToken, $apiKey, $model, $requestedAt);
+                $result = $this->handleNonStreamingRequest($rawBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
             }
 
             if ($result instanceof Response && in_array($result->getStatusCode(), [429, 529])) {
-                $excludeKeyIds[] = $apiKey->id;
+                $excludeTokenIds[] = $accessToken->id;
                 $lastError = $result;
 
                 continue;
@@ -65,8 +65,8 @@ class ProxyService
     private function handleNonStreamingRequest(
         string $rawBody,
         array $proxyHeaders,
+        ApiKey $apiKey,
         AccessToken $accessToken,
-        AnthropicApiKey $apiKey,
         string $model,
         Carbon $requestedAt,
     ): Response {
@@ -85,8 +85,8 @@ class ProxyService
         $cacheReadInputTokens = $responseData['usage']['cache_read_input_tokens'] ?? null;
 
         $this->logRequest(
-            accessToken: $accessToken,
             apiKey: $apiKey,
+            accessToken: $accessToken,
             model: $model,
             statusCode: $statusCode,
             isStream: false,
@@ -106,8 +106,8 @@ class ProxyService
     private function handleStreamingRequest(
         string $rawBody,
         array $proxyHeaders,
+        ApiKey $apiKey,
         AccessToken $accessToken,
-        AnthropicApiKey $apiKey,
         string $model,
         Carbon $requestedAt,
     ): Response {
@@ -127,8 +127,8 @@ class ProxyService
             $responseBody = json_decode($body, true) ?: [];
 
             $this->logRequest(
-                accessToken: $accessToken,
                 apiKey: $apiKey,
+                accessToken: $accessToken,
                 model: $model,
                 statusCode: $statusCode,
                 isStream: true,
@@ -137,7 +137,7 @@ class ProxyService
                 cacheCreationInputTokens: null,
                 cacheReadInputTokens: null,
                 requestedAt: $requestedAt,
-                errorMessage: $responseData['error']['message'] ?? null,
+                errorMessage: $responseBody['error']['message'] ?? null,
             );
 
             $responseHeaders = $this->forwardResponseHeaders($response);
@@ -154,7 +154,7 @@ class ProxyService
         $proxyService = $this;
         $streamBody = $response->getBody();
 
-        return new StreamedResponse(function () use ($streamBody, $proxyService, $accessToken, $apiKey, $model, $requestedAt) {
+        return new StreamedResponse(function () use ($streamBody, $proxyService, $apiKey, $accessToken, $model, $requestedAt) {
             $streamHandler = app()->make(StreamHandler::class);
 
             $errorMessage = null;
@@ -185,8 +185,8 @@ class ProxyService
             }
 
             $proxyService->logRequest(
-                accessToken: $accessToken,
                 apiKey: $apiKey,
+                accessToken: $accessToken,
                 model: $model,
                 statusCode: 200,
                 isStream: true,
@@ -203,10 +203,10 @@ class ProxyService
     /**
      * @return array<string, string>
      */
-    private function buildProxyHeaders(Request $request, string $apiKeyValue): array
+    private function buildProxyHeaders(Request $request, string $tokenValue): array
     {
         $headers = [
-            'x-api-key' => $apiKeyValue,
+            'x-api-key' => $tokenValue,
             'anthropic-version' => $request->header('anthropic-version', config('airoxy.anthropic_version')),
         ];
 
@@ -247,8 +247,8 @@ class ProxyService
     }
 
     public function logRequest(
+        ApiKey $apiKey,
         AccessToken $accessToken,
-        AnthropicApiKey $apiKey,
         string $model,
         int $statusCode,
         bool $isStream,

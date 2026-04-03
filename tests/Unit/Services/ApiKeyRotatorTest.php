@@ -1,67 +1,76 @@
 <?php
 
-use App\Models\AnthropicApiKey;
-use App\Services\ApiKeyRotator;
+use App\Models\AccessToken;
+use App\Services\AccessTokenRotator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-it('selects the least recently used active key', function () {
-    AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'key-1', 'usage_order' => 1, 'last_used_at' => now()->subMinutes(10)]);
-    AnthropicApiKey::create(['name' => 'Key 2', 'api_key' => 'key-2', 'usage_order' => 2, 'last_used_at' => now()->subMinutes(20)]);
-    AnthropicApiKey::create(['name' => 'Key 3', 'api_key' => 'key-3', 'usage_order' => 3, 'last_used_at' => now()->subMinutes(5)]);
+it('selects the least recently used active token', function () {
+    AccessToken::create(['name' => 'Token 1', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'last_used_at' => now()->subMinutes(10), 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Token 2', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 2, 'last_used_at' => now()->subMinutes(20), 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Token 3', 'token' => 't3', 'refresh_token' => 'r3', 'usage_order' => 3, 'last_used_at' => now()->subMinutes(5), 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key->name)->toBe('Key 2');
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->name)->toBe('Token 2');
 });
 
-it('prefers keys with null last_used_at', function () {
-    AnthropicApiKey::create(['name' => 'Used', 'api_key' => 'key-1', 'usage_order' => 1, 'last_used_at' => now()]);
-    AnthropicApiKey::create(['name' => 'Never Used', 'api_key' => 'key-2', 'usage_order' => 2, 'last_used_at' => null]);
+it('prefers tokens with null last_used_at', function () {
+    AccessToken::create(['name' => 'Used', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'last_used_at' => now(), 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Never Used', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 2, 'last_used_at' => null, 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key->name)->toBe('Never Used');
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->name)->toBe('Never Used');
 });
 
 it('uses usage_order as tiebreaker', function () {
-    AnthropicApiKey::create(['name' => 'Order 2', 'api_key' => 'key-1', 'usage_order' => 2, 'last_used_at' => null]);
-    AnthropicApiKey::create(['name' => 'Order 1', 'api_key' => 'key-2', 'usage_order' => 1, 'last_used_at' => null]);
+    AccessToken::create(['name' => 'Order 2', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 2, 'last_used_at' => null, 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Order 1', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 1, 'last_used_at' => null, 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key->name)->toBe('Order 1');
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->name)->toBe('Order 1');
 });
 
-it('skips inactive keys', function () {
-    AnthropicApiKey::create(['name' => 'Inactive', 'api_key' => 'key-1', 'usage_order' => 1, 'is_active' => false]);
-    AnthropicApiKey::create(['name' => 'Active', 'api_key' => 'key-2', 'usage_order' => 2, 'is_active' => true]);
+it('skips inactive tokens', function () {
+    AccessToken::create(['name' => 'Inactive', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'is_active' => false, 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Active', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 2, 'is_active' => true, 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key->name)->toBe('Active');
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->name)->toBe('Active');
 });
 
-it('skips excluded key IDs', function () {
-    AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'key-1', 'usage_order' => 1]);
-    AnthropicApiKey::create(['name' => 'Key 2', 'api_key' => 'key-2', 'usage_order' => 2]);
+it('skips expired tokens', function () {
+    AccessToken::create(['name' => 'Expired', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'is_active' => true, 'token_expires_at' => now()->subHour()]);
+    AccessToken::create(['name' => 'Valid', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 2, 'is_active' => true, 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext(excludeIds: [1]);
-    expect($key->name)->toBe('Key 2');
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->name)->toBe('Valid');
 });
 
-it('returns null when no keys available', function () {
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key)->toBeNull();
+it('skips excluded token IDs', function () {
+    AccessToken::create(['name' => 'Token 1', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'token_expires_at' => now()->addDay()]);
+    AccessToken::create(['name' => 'Token 2', 'token' => 't2', 'refresh_token' => 'r2', 'usage_order' => 2, 'token_expires_at' => now()->addDay()]);
+
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext(excludeIds: [1]);
+    expect($token->name)->toBe('Token 2');
+});
+
+it('returns null when no tokens available', function () {
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token)->toBeNull();
 });
 
 it('updates last_used_at after selection', function () {
-    AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'key-1', 'usage_order' => 1, 'last_used_at' => null]);
+    AccessToken::create(['name' => 'Token 1', 'token' => 't1', 'refresh_token' => 'r1', 'usage_order' => 1, 'last_used_at' => null, 'token_expires_at' => now()->addDay()]);
 
-    $rotator = new ApiKeyRotator;
-    $key = $rotator->selectNext();
-    expect($key->last_used_at)->not->toBeNull();
+    $rotator = new AccessTokenRotator;
+    $token = $rotator->selectNext();
+    expect($token->last_used_at)->not->toBeNull();
 });

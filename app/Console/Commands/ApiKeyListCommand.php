@@ -2,18 +2,18 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use Illuminate\Console\Command;
 
 class ApiKeyListCommand extends Command
 {
     protected $signature = 'airoxy:api-key:list';
 
-    protected $description = 'List all Anthropic API keys';
+    protected $description = 'List all API keys';
 
     public function handle(): int
     {
-        $keys = AnthropicApiKey::orderBy('usage_order')->get();
+        $keys = ApiKey::orderBy('id')->get();
 
         if ($keys->isEmpty()) {
             $this->warn('No API keys found.');
@@ -22,14 +22,12 @@ class ApiKeyListCommand extends Command
         }
 
         $this->table(
-            ['ID', 'Name', 'Key', 'Active', 'Order', 'Last Used'],
-            $keys->map(fn (AnthropicApiKey $key) => [
+            ['ID', 'Name', 'Key', 'Active'],
+            $keys->map(fn (ApiKey $key) => [
                 $key->id,
                 $key->name ?? '-',
                 $key->masked_key,
                 $key->is_active ? 'Yes' : 'No',
-                $key->usage_order,
-                $key->last_used_at?->diffForHumans() ?? 'Never',
             ]),
         );
 

@@ -2,7 +2,7 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\AccessToken;
+use App\Models\ApiKey;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -11,23 +11,21 @@ class AuthenticateToken
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $tokenValue = $request->header('x-api-key');
+        $keyValue = $request->header('x-api-key');
 
-        if (! $tokenValue) {
+        if (! $keyValue) {
             return $this->unauthorized();
         }
 
-        $token = AccessToken::where('token', $tokenValue)
+        $apiKey = ApiKey::where('key', $keyValue)
             ->where('is_active', true)
             ->first();
 
-        if (! $token || $token->isExpired()) {
+        if (! $apiKey) {
             return $this->unauthorized();
         }
 
-        $token->updateQuietly(['last_used_at' => now()]);
-
-        $request->attributes->set('access_token', $token);
+        $request->attributes->set('api_key', $apiKey);
 
         return $next($request);
     }

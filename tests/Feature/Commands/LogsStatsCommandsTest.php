@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\AccessToken;
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use App\Models\RequestLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -9,7 +9,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->token = AccessToken::create(['name' => 'Client 1', 'token' => 't1', 'refresh_token' => 'r1']);
-    $this->apiKey = AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'k1', 'usage_order' => 1]);
+    $this->apiKey = ApiKey::create(['name' => 'Key 1', 'key' => 'ak-test-key-value']);
 });
 
 it('shows recent request logs', function () {

@@ -1,30 +1,20 @@
 <?php
 
-use App\Models\AnthropicApiKey;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
+use App\Models\ApiKey;
 
-uses(RefreshDatabase::class);
+it('generates a key with ak- prefix', function () {
+    $key = ApiKey::generateKey();
 
-it('encrypts api_key when storing', function () {
-    $key = AnthropicApiKey::create([
-        'name' => 'Test Key',
-        'api_key' => 'sk-ant-api03-test-key-value',
-        'usage_order' => 1,
-    ]);
-
-    $raw = DB::table('anthropic_api_keys')->where('id', $key->id)->value('api_key');
-    expect($raw)->not->toBe('sk-ant-api03-test-key-value');
-
-    $key->refresh();
-    expect($key->api_key)->toBe('sk-ant-api03-test-key-value');
+    expect($key)->toStartWith('ak-')
+        ->and(strlen($key))->toBe(43);
 });
 
-it('masks the api key for display showing last 8 chars', function () {
-    $key = new AnthropicApiKey(['api_key' => 'sk-ant-api03-abcdefghijklmnop']);
+it('masks the key for display showing first 8 and last 4 chars', function () {
+    $key = new ApiKey(['key' => 'ak-abcdefghijklmnopqrstuvwxyz1234567890']);
     $masked = $key->masked_key;
 
     expect($masked)
-        ->toEndWith('ijklmnop')
+        ->toStartWith('ak-abcde')
+        ->toEndWith('7890')
         ->toContain('***');
 });

@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\AccessToken;
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use App\Models\RequestLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -9,17 +9,18 @@ use Illuminate\Support\Facades\Http;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    $this->token = AccessToken::create([
+    $this->apiKey = ApiKey::create([
         'name' => 'Test Client',
-        'token' => 'test-token',
+        'key' => 'test-api-key',
+        'is_active' => true,
+    ]);
+
+    $this->accessToken = AccessToken::create([
+        'name' => 'Token 1',
+        'token' => 'sk-ant-api03-test',
         'refresh_token' => 'test-refresh',
         'is_active' => true,
         'token_expires_at' => now()->addDay(),
-    ]);
-
-    $this->apiKey = AnthropicApiKey::create([
-        'name' => 'Key 1',
-        'api_key' => 'sk-ant-api03-test',
         'usage_order' => 1,
     ]);
 });
@@ -42,7 +43,7 @@ it('proxies a non-streaming request to Anthropic', function () {
         'model' => 'claude-sonnet-4-6',
         'max_tokens' => 100,
         'messages' => [['role' => 'user', 'content' => 'Hi']],
-    ], ['x-api-key' => 'test-token']);
+    ], ['x-api-key' => 'test-api-key']);
 
     $response->assertStatus(200)
         ->assertJsonPath('content.0.text', 'Hello!');
@@ -63,7 +64,7 @@ it('logs the request after proxying', function () {
         'model' => 'claude-sonnet-4-6',
         'max_tokens' => 100,
         'messages' => [['role' => 'user', 'content' => 'Hi']],
-    ], ['x-api-key' => 'test-token']);
+    ], ['x-api-key' => 'test-api-key']);
 
     expect(RequestLog::count())->toBe(1);
 
@@ -73,8 +74,8 @@ it('logs the request after proxying', function () {
         ->and($log->output_tokens)->toBe(5)
         ->and($log->status_code)->toBe(200)
         ->and($log->is_stream)->toBeFalse()
-        ->and($log->access_token_id)->toBe($this->token->id)
-        ->and($log->api_key_id)->toBe($this->apiKey->id);
+        ->and($log->api_key_id)->toBe($this->apiKey->id)
+        ->and($log->access_token_id)->toBe($this->accessToken->id);
 });
 
 it('forwards the raw body without modification', function () {
@@ -85,7 +86,7 @@ it('forwards the raw body without modification', function () {
     $rawBody = '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[{"role":"user","content":"Hi"}]}';
 
     $this->call('POST', '/v1/messages', [], [], [], [
-        'HTTP_X_API_KEY' => 'test-token',
+        'HTTP_X_API_KEY' => 'test-api-key',
         'CONTENT_TYPE' => 'application/json',
     ], $rawBody);
 
@@ -105,16 +106,19 @@ it('forwards Anthropic error responses with correct status code', function () {
     $response = $this->postJson('/v1/messages', [
         'model' => 'claude-sonnet-4-6',
         'messages' => [['role' => 'user', 'content' => 'Hi']],
-    ], ['x-api-key' => 'test-token']);
+    ], ['x-api-key' => 'test-api-key']);
 
     $response->assertStatus(400)
         ->assertJsonPath('error.type', 'invalid_request_error');
 });
 
-it('retries with next API key on 429', function () {
-    $key2 = AnthropicApiKey::create([
-        'name' => 'Key 2',
-        'api_key' => 'sk-ant-api03-test-2',
+it('retries with next access token on 429', function () {
+    $token2 = AccessToken::create([
+        'name' => 'Token 2',
+        'token' => 'sk-ant-api03-test-2',
+        'refresh_token' => 'test-refresh-2',
+        'is_active' => true,
+        'token_expires_at' => now()->addDay(),
         'usage_order' => 2,
     ]);
 
@@ -132,13 +136,13 @@ it('retries with next API key on 429', function () {
         'model' => 'claude-sonnet-4-6',
         'max_tokens' => 100,
         'messages' => [['role' => 'user', 'content' => 'Hi']],
-    ], ['x-api-key' => 'test-token']);
+    ], ['x-api-key' => 'test-api-key']);
 
     $response->assertStatus(200)
         ->assertJsonPath('content.0.text', 'Success');
 });
 
-it('returns 401 without valid token', function () {
+it('returns 401 without valid API key', function () {
     $response = $this->postJson('/v1/messages', [
         'model' => 'claude-sonnet-4-6',
         'messages' => [['role' => 'user', 'content' => 'Hi']],
@@ -147,14 +151,14 @@ it('returns 401 without valid token', function () {
     $response->assertStatus(401);
 });
 
-it('returns error when no API keys available', function () {
-    AnthropicApiKey::query()->delete();
+it('returns error when no access tokens available', function () {
+    AccessToken::query()->delete();
 
     $response = $this->postJson('/v1/messages', [
         'model' => 'claude-sonnet-4-6',
         'max_tokens' => 100,
         'messages' => [['role' => 'user', 'content' => 'Hi']],
-    ], ['x-api-key' => 'test-token']);
+    ], ['x-api-key' => 'test-api-key']);
 
     $response->assertStatus(503);
 });
@@ -169,7 +173,7 @@ it('forwards anthropic-version and anthropic-beta headers', function () {
         'max_tokens' => 100,
         'messages' => [['role' => 'user', 'content' => 'Hi']],
     ], [
-        'x-api-key' => 'test-token',
+        'x-api-key' => 'test-api-key',
         'anthropic-version' => '2024-01-01',
         'anthropic-beta' => 'some-beta-feature',
     ]);

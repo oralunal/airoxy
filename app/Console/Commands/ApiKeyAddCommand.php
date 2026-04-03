@@ -2,26 +2,28 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use Illuminate\Console\Command;
 
 class ApiKeyAddCommand extends Command
 {
-    protected $signature = 'airoxy:api-key:add {api_key} {--name=}';
+    protected $signature = 'airoxy:api-key:add {--name=}';
 
-    protected $description = 'Add a new Anthropic API key';
+    protected $description = 'Add a new API key for client authentication';
 
     public function handle(): int
     {
-        $maxOrder = AnthropicApiKey::max('usage_order') ?? 0;
+        $generatedKey = ApiKey::generateKey();
 
-        $key = AnthropicApiKey::create([
+        $key = ApiKey::create([
             'name' => $this->option('name'),
-            'api_key' => $this->argument('api_key'),
-            'usage_order' => $maxOrder + 1,
+            'key' => $generatedKey,
         ]);
 
         $this->info("API key added successfully (ID: {$key->id}).");
+        $this->newLine();
+        $this->warn('Save this key now — it will not be shown again:');
+        $this->line($generatedKey);
 
         return self::SUCCESS;
     }

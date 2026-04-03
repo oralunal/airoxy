@@ -10,8 +10,8 @@ class ProxyController extends Controller
 {
     public function handle(Request $request, ProxyService $proxyService): Response
     {
-        $accessToken = $request->attributes->get('access_token');
+        $apiKey = $request->attributes->get('api_key');
 
-        return $proxyService->handle($request, $accessToken);
+        return $proxyService->handle($request, $apiKey);
     }
 }

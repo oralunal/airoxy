@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\AccessToken;
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use App\Models\DailyStat;
 use App\Models\RequestLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -10,7 +10,7 @@ uses(RefreshDatabase::class);
 
 it('aggregates request logs into daily stats', function () {
     $token = AccessToken::create(['name' => 'T1', 'token' => 't1', 'refresh_token' => 'r1']);
-    $key = AnthropicApiKey::create(['name' => 'K1', 'api_key' => 'k1', 'usage_order' => 1]);
+    $key = ApiKey::create(['name' => 'K1', 'key' => 'ak-test-key']);
 
     $yesterday = now()->subDay()->startOfDay();
 
@@ -42,7 +42,7 @@ it('aggregates request logs into daily stats', function () {
 
 it('purges old request logs', function () {
     $token = AccessToken::create(['name' => 'T1', 'token' => 't1', 'refresh_token' => 'r1']);
-    $key = AnthropicApiKey::create(['name' => 'K1', 'api_key' => 'k1', 'usage_order' => 1]);
+    $key = ApiKey::create(['name' => 'K1', 'key' => 'ak-test-key-2']);
 
     // Old log (4 days ago)
     RequestLog::create([

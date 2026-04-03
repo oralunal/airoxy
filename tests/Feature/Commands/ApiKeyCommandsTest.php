@@ -1,23 +1,22 @@
 <?php
 
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-it('adds a new API key', function () {
+it('adds a new API key with auto-generated key', function () {
     $this->artisan('airoxy:api-key:add', [
-        'api_key' => 'sk-ant-api03-test-key',
         '--name' => 'Test Key',
     ])->assertExitCode(0);
 
-    expect(AnthropicApiKey::count())->toBe(1);
-    expect(AnthropicApiKey::first()->name)->toBe('Test Key');
-    expect(AnthropicApiKey::first()->api_key)->toBe('sk-ant-api03-test-key');
+    expect(ApiKey::count())->toBe(1);
+    expect(ApiKey::first()->name)->toBe('Test Key');
+    expect(ApiKey::first()->key)->toStartWith('ak-');
 });
 
 it('lists API keys with masked values', function () {
-    AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'sk-ant-api03-abcdefghijklmnop', 'usage_order' => 1]);
+    ApiKey::create(['name' => 'Key 1', 'key' => ApiKey::generateKey()]);
 
     $this->artisan('airoxy:api-key:list')
         ->assertExitCode(0)
@@ -25,16 +24,16 @@ it('lists API keys with masked values', function () {
 });
 
 it('removes an API key by ID', function () {
-    $key = AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'test', 'usage_order' => 1]);
+    $key = ApiKey::create(['name' => 'Key 1', 'key' => ApiKey::generateKey()]);
 
     $this->artisan('airoxy:api-key:remove', ['id' => $key->id])
         ->assertExitCode(0);
 
-    expect(AnthropicApiKey::count())->toBe(0);
+    expect(ApiKey::count())->toBe(0);
 });
 
 it('toggles an API key active status', function () {
-    $key = AnthropicApiKey::create(['name' => 'Key 1', 'api_key' => 'test', 'usage_order' => 1, 'is_active' => true]);
+    $key = ApiKey::create(['name' => 'Key 1', 'key' => ApiKey::generateKey(), 'is_active' => true]);
 
     $this->artisan('airoxy:api-key:toggle', ['id' => $key->id])
         ->assertExitCode(0);

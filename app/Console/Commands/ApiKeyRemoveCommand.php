@@ -2,18 +2,18 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AnthropicApiKey;
+use App\Models\ApiKey;
 use Illuminate\Console\Command;
 
 class ApiKeyRemoveCommand extends Command
 {
     protected $signature = 'airoxy:api-key:remove {id}';
 
-    protected $description = 'Remove an Anthropic API key';
+    protected $description = 'Remove an API key';
 
     public function handle(): int
     {
-        $key = AnthropicApiKey::find($this->argument('id'));
+        $key = ApiKey::find($this->argument('id'));
 
         if (! $key) {
             $this->error('API key not found.');
