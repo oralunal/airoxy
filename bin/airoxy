@@ -1,0 +1,3 @@
+#!/bin/bash
+AIROXY_PATH="/var/www/airoxy"
+cd "$AIROXY_PATH" && php artisan "airoxy:$1" "${@:2}"
