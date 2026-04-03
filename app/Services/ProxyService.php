@@ -72,16 +72,17 @@ class ProxyService
     ): Response {
         $response = Http::withHeaders($proxyHeaders)
             ->timeout(300)
+            ->connectTimeout(10)
             ->withBody($rawBody, 'application/json')
             ->post(config('airoxy.anthropic_api_url'));
 
         $statusCode = $response->status();
-        $responseBody = $response->json() ?? [];
+        $responseData = $response->json() ?? [];
 
-        $inputTokens = $responseBody['usage']['input_tokens'] ?? null;
-        $outputTokens = $responseBody['usage']['output_tokens'] ?? null;
-        $cacheCreationInputTokens = $responseBody['usage']['cache_creation_input_tokens'] ?? null;
-        $cacheReadInputTokens = $responseBody['usage']['cache_read_input_tokens'] ?? null;
+        $inputTokens = $responseData['usage']['input_tokens'] ?? null;
+        $outputTokens = $responseData['usage']['output_tokens'] ?? null;
+        $cacheCreationInputTokens = $responseData['usage']['cache_creation_input_tokens'] ?? null;
+        $cacheReadInputTokens = $responseData['usage']['cache_read_input_tokens'] ?? null;
 
         $this->logRequest(
             accessToken: $accessToken,
@@ -94,7 +95,7 @@ class ProxyService
             cacheCreationInputTokens: $cacheCreationInputTokens,
             cacheReadInputTokens: $cacheReadInputTokens,
             requestedAt: $requestedAt,
-            errorMessage: $statusCode >= 400 ? ($responseBody['error']['message'] ?? null) : null,
+            errorMessage: $statusCode >= 400 ? ($responseData['error']['message'] ?? null) : null,
         );
 
         $responseHeaders = $this->forwardResponseHeaders($response);
@@ -111,8 +112,11 @@ class ProxyService
         Carbon $requestedAt,
     ): Response {
         $response = Http::withHeaders($proxyHeaders)
-            ->timeout(300)
-            ->withOptions(['stream' => true])
+            ->connectTimeout(10)
+            ->withOptions([
+                'stream' => true,
+                'read_timeout' => 300,
+            ])
             ->withBody($rawBody, 'application/json')
             ->post(config('airoxy.anthropic_api_url'));
 
@@ -133,7 +137,7 @@ class ProxyService
                 cacheCreationInputTokens: null,
                 cacheReadInputTokens: null,
                 requestedAt: $requestedAt,
-                errorMessage: $responseBody['error']['message'] ?? null,
+                errorMessage: $responseData['error']['message'] ?? null,
             );
 
             $responseHeaders = $this->forwardResponseHeaders($response);
@@ -141,26 +145,43 @@ class ProxyService
             return response($body, $statusCode)->withHeaders($responseHeaders);
         }
 
-        $responseHeaders = $this->forwardResponseHeaders($response);
+        $responseHeaders = array_merge($this->forwardResponseHeaders($response), [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
         $proxyService = $this;
         $streamBody = $response->getBody();
 
         return new StreamedResponse(function () use ($streamBody, $proxyService, $accessToken, $apiKey, $model, $requestedAt) {
             $streamHandler = app()->make(StreamHandler::class);
 
-            while (! $streamBody->eof()) {
-                $chunk = $streamBody->read(8192);
-                if ($chunk === '') {
-                    break;
-                }
+            $errorMessage = null;
 
-                $streamHandler->parseSSEChunk($chunk);
-                echo $chunk;
+            try {
+                while (! $streamBody->eof()) {
+                    if (connection_aborted()) {
+                        $errorMessage = 'Client disconnected';
+                        break;
+                    }
 
-                if (ob_get_level() > 0) {
-                    ob_flush();
+                    $chunk = $streamBody->read(8192);
+                    if ($chunk === '') {
+                        break;
+                    }
+
+                    echo $chunk;
+
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+
+                    $streamHandler->parseSSEChunk($chunk);
                 }
-                flush();
+            } catch (\Throwable $e) {
+                $errorMessage = $e->getMessage();
             }
 
             $proxyService->logRequest(
@@ -174,6 +195,7 @@ class ProxyService
                 cacheCreationInputTokens: $streamHandler->getCacheCreationInputTokens(),
                 cacheReadInputTokens: $streamHandler->getCacheReadInputTokens(),
                 requestedAt: $requestedAt,
+                errorMessage: $errorMessage,
             );
         }, 200, $responseHeaders);
     }
@@ -262,6 +284,7 @@ class ProxyService
             'error_message' => $errorMessage,
             'duration_ms' => $durationMs,
             'requested_at' => $requestedAt,
+            'created_at' => now(),
         ]);
     }
 }
