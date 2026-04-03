@@ -61,8 +61,11 @@ The raw request body (`request()->getContent()`) is forwarded **verbatim** to An
 
 ```
 airoxy:serve
-  └── php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=3800 --workers=auto
+  └── Reads AIROXY_HOST and AIROXY_PORT from .env
+  └── php artisan octane:start --server=frankenphp --host={host} --port={port} --workers=auto
 ```
+
+The `airoxy:serve` command reads `.env` values and passes them to `octane:start`. This way the supervisor config calls `airoxy:serve` (not `octane:start` directly), and host/port changes only require editing `.env`.
 
 - Standalone process, does not affect other PHP/Laravel apps on the server
 - Workers scale to CPU cores automatically
@@ -527,7 +530,7 @@ Two processes:
 
 ```ini
 [program:airoxy]
-command=php /var/www/airoxy/artisan octane:start --server=frankenphp --host=0.0.0.0 --port=3800 --workers=auto
+command=php /var/www/airoxy/artisan airoxy:serve
 autostart=true
 autorestart=true
 user=www-data
