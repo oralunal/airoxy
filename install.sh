@@ -6,7 +6,15 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+export COMPOSER_ALLOW_SUPERUSER=1
+
 INSTALL_PATH="/var/www/airoxy"
+
+# Root check
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}Error: This script must be run as root.${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}=== Airoxy Installer ===${NC}"
 echo ""
@@ -63,6 +71,8 @@ echo "  Git ✓"
 # 2. Clone & setup
 echo ""
 echo -e "${YELLOW}[2/7] Cloning repository...${NC}"
+
+git config --global --add safe.directory "$INSTALL_PATH" 2>/dev/null || true
 
 if [ -d "$INSTALL_PATH" ]; then
     echo -e "${YELLOW}  $INSTALL_PATH already exists. Pulling latest...${NC}"

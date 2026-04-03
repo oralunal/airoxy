@@ -1,3 +1,305 @@
 #!/bin/bash
+set -e
+
 AIROXY_PATH="/var/www/airoxy"
-cd "$AIROXY_PATH" && php artisan "airoxy:$1" "${@:2}"
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+export COMPOSER_ALLOW_SUPERUSER=1
+
+# ─── Helpers ───────────────────────────────────────────────
+
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo -e "${RED}Error: This command must be run as root.${NC}"
+        exit 1
+    fi
+}
+
+check_ok() {
+    echo -e "  ${GREEN}✓${NC} $1"
+}
+
+check_fail() {
+    echo -e "  ${RED}✗${NC} $1"
+}
+
+check_fix() {
+    echo -e "  ${YELLOW}↻${NC} $1"
+}
+
+# ─── Update ────────────────────────────────────────────────
+
+do_update() {
+    require_root
+
+    echo -e "${GREEN}=== Airoxy Update ===${NC}"
+    echo ""
+
+    cd "$AIROXY_PATH"
+
+    echo -e "${YELLOW}[1/5] Pulling latest code...${NC}"
+    git config --global --add safe.directory "$AIROXY_PATH" 2>/dev/null || true
+    git pull
+    echo ""
+
+    echo -e "${YELLOW}[2/5] Installing dependencies...${NC}"
+    composer install --no-dev --optimize-autoloader --no-interaction
+    echo ""
+
+    echo -e "${YELLOW}[3/5] Running migrations...${NC}"
+    php artisan migrate --force --no-interaction
+    echo ""
+
+    echo -e "${YELLOW}[4/5] Setting permissions...${NC}"
+    chown -R www-data:www-data "$AIROXY_PATH"
+    chmod -R 775 storage bootstrap/cache database
+    echo ""
+
+    echo -e "${YELLOW}[5/5] Restarting services...${NC}"
+    cp "$AIROXY_PATH/supervisor/airoxy-worker.conf" /etc/supervisor/conf.d/airoxy.conf
+    cp "$AIROXY_PATH/bin/airoxy" /usr/local/bin/airoxy
+    chmod +x /usr/local/bin/airoxy
+    supervisorctl reread
+    supervisorctl update
+    supervisorctl restart airoxy
+    echo ""
+
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Airoxy updated successfully!${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+}
+
+# ─── Doctor ────────────────────────────────────────────────
+
+do_doctor() {
+    require_root
+
+    echo -e "${GREEN}=== Airoxy Doctor ===${NC}"
+    echo ""
+
+    ISSUES=0
+    FIXED=0
+
+    cd "$AIROXY_PATH" 2>/dev/null || {
+        check_fail "Airoxy not found at $AIROXY_PATH"
+        echo -e "${RED}Run install.sh first.${NC}"
+        exit 1
+    }
+
+    # PHP version
+    PHP_MAJOR=$(php -r 'echo PHP_MAJOR_VERSION;' 2>/dev/null || echo "0")
+    PHP_MINOR=$(php -r 'echo PHP_MINOR_VERSION;' 2>/dev/null || echo "0")
+    if [ "$PHP_MAJOR" -lt 8 ] || { [ "$PHP_MAJOR" -eq 8 ] && [ "$PHP_MINOR" -lt 5 ]; }; then
+        check_fail "PHP 8.5+ required (found: ${PHP_MAJOR}.${PHP_MINOR})"
+        ISSUES=$((ISSUES + 1))
+    else
+        check_ok "PHP ${PHP_MAJOR}.${PHP_MINOR}"
+    fi
+
+    # PHP extensions
+    MISSING_EXT=""
+    for ext in curl mbstring sqlite3 openssl tokenizer xml; do
+        if ! php -m | grep -qi "^$ext$"; then
+            MISSING_EXT="$MISSING_EXT $ext"
+        fi
+    done
+    if [ -n "$MISSING_EXT" ]; then
+        check_fail "Missing PHP extensions:$MISSING_EXT"
+        ISSUES=$((ISSUES + 1))
+    else
+        check_ok "PHP extensions"
+    fi
+
+    # Composer
+    if ! command -v composer &>/dev/null; then
+        check_fix "Composer not found — installing..."
+        curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Composer"
+    fi
+
+    # Supervisor
+    if ! command -v supervisorctl &>/dev/null; then
+        check_fix "Supervisor not found — installing..."
+        apt-get update -qq && apt-get install -y -qq supervisor
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Supervisor"
+    fi
+
+    # .env file
+    if [ ! -f .env ]; then
+        check_fix ".env missing — creating from .env.example..."
+        cp .env.example .env
+        php artisan key:generate --no-interaction
+        FIXED=$((FIXED + 1))
+    else
+        check_ok ".env file"
+    fi
+
+    # APP_KEY
+    if ! grep -q "^APP_KEY=base64:" .env 2>/dev/null; then
+        check_fix "APP_KEY not set — generating..."
+        php artisan key:generate --no-interaction
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "APP_KEY"
+    fi
+
+    # SQLite database
+    if [ ! -f database/database.sqlite ]; then
+        check_fix "SQLite database missing — creating..."
+        touch database/database.sqlite
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "SQLite database"
+    fi
+
+    # Database writable
+    if [ ! -w database/database.sqlite ]; then
+        check_fix "Database not writable — fixing permissions..."
+        chmod 775 database/database.sqlite
+        chown www-data:www-data database/database.sqlite
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Database writable"
+    fi
+
+    # Migrations
+    PENDING=$(php artisan migrate:status --no-interaction 2>&1 | grep -c "Pending" || true)
+    if [ "$PENDING" -gt 0 ]; then
+        check_fix "${PENDING} pending migration(s) — running..."
+        php artisan migrate --force --no-interaction
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Migrations up to date"
+    fi
+
+    # FrankenPHP binary
+    if [ ! -f frankenphp-worker.php ] && [ ! -f "$AIROXY_PATH/frankenphp" ]; then
+        # Check if octane frankenphp is available
+        if ! php artisan octane:status --server=frankenphp &>/dev/null 2>&1; then
+            check_fix "FrankenPHP not installed — installing..."
+            php artisan octane:install --server=frankenphp --no-interaction 2>/dev/null || true
+            FIXED=$((FIXED + 1))
+        else
+            check_ok "FrankenPHP"
+        fi
+    else
+        check_ok "FrankenPHP"
+    fi
+
+    # File permissions
+    OWNER=$(stat -c '%U' storage 2>/dev/null || stat -f '%Su' storage 2>/dev/null)
+    if [ "$OWNER" != "www-data" ]; then
+        check_fix "File ownership incorrect — fixing..."
+        chown -R www-data:www-data "$AIROXY_PATH"
+        chmod -R 775 storage bootstrap/cache database
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "File permissions"
+    fi
+
+    # Supervisor config
+    if [ ! -f /etc/supervisor/conf.d/airoxy.conf ]; then
+        check_fix "Supervisor config missing — installing..."
+        mkdir -p /var/log/airoxy
+        cp "$AIROXY_PATH/supervisor/airoxy-worker.conf" /etc/supervisor/conf.d/airoxy.conf
+        supervisorctl reread
+        supervisorctl update
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Supervisor config"
+    fi
+
+    # Airoxy process running
+    if supervisorctl status airoxy 2>/dev/null | grep -q "RUNNING"; then
+        check_ok "Airoxy process running"
+    else
+        check_fix "Airoxy not running — starting..."
+        supervisorctl start airoxy 2>/dev/null || supervisorctl restart airoxy 2>/dev/null || true
+        sleep 2
+        if supervisorctl status airoxy 2>/dev/null | grep -q "RUNNING"; then
+            FIXED=$((FIXED + 1))
+        else
+            check_fail "Could not start Airoxy — check: supervisorctl tail airoxy"
+            ISSUES=$((ISSUES + 1))
+        fi
+    fi
+
+    # Scheduler process running
+    if supervisorctl status airoxy-scheduler 2>/dev/null | grep -q "RUNNING"; then
+        check_ok "Scheduler process running"
+    else
+        check_fix "Scheduler not running — starting..."
+        supervisorctl start airoxy-scheduler 2>/dev/null || true
+        FIXED=$((FIXED + 1))
+    fi
+
+    # Global alias
+    if [ ! -f /usr/local/bin/airoxy ]; then
+        check_fix "Global alias missing — installing..."
+        cp "$AIROXY_PATH/bin/airoxy" /usr/local/bin/airoxy
+        chmod +x /usr/local/bin/airoxy
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Global alias"
+    fi
+
+    # Summary
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    if [ "$ISSUES" -eq 0 ]; then
+        if [ "$FIXED" -gt 0 ]; then
+            echo -e "${GREEN}  All clear! Fixed ${FIXED} issue(s).${NC}"
+        else
+            echo -e "${GREEN}  All clear! No issues found.${NC}"
+        fi
+    else
+        echo -e "${RED}  ${ISSUES} issue(s) need manual attention.${NC}"
+        if [ "$FIXED" -gt 0 ]; then
+            echo -e "${YELLOW}  ${FIXED} issue(s) were auto-fixed.${NC}"
+        fi
+    fi
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+}
+
+# ─── Main Router ───────────────────────────────────────────
+
+case "${1:-}" in
+    update)
+        do_update
+        ;;
+    doctor)
+        do_doctor
+        ;;
+    "")
+        echo "Usage: airoxy <command> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  serve                Start the proxy server"
+        echo "  update               Pull latest code and restart"
+        echo "  doctor               Check and fix system health"
+        echo "  api-key:add          Add an Anthropic API key"
+        echo "  api-key:list         List API keys"
+        echo "  api-key:remove       Remove an API key"
+        echo "  api-key:toggle       Toggle API key active/inactive"
+        echo "  token:add            Add an access token"
+        echo "  token:list           List access tokens"
+        echo "  token:remove         Remove an access token"
+        echo "  token:refresh        Refresh tokens via OAuth2"
+        echo "  token:auto           Auto-import from credentials files"
+        echo "  logs                 Show request logs"
+        echo "  stats                Show usage statistics"
+        ;;
+    *)
+        cd "$AIROXY_PATH" && php artisan "airoxy:$1" "${@:2}"
+        ;;
+esac
