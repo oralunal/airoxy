@@ -73,7 +73,7 @@ class ProxyService
         $response = Http::withHeaders($proxyHeaders)
             ->timeout(300)
             ->connectTimeout(10)
-            ->withBody($rawBody, 'application/json')
+            ->withBody($rawBody)
             ->post(config('airoxy.anthropic_api_url'));
 
         $statusCode = $response->status();
