@@ -247,7 +247,18 @@ class ProxyService
         $headers['content-type'] = 'application/json';
         $headers['anthropic-version'] = $request->header('anthropic-version', config('airoxy.anthropic_version'));
         $headers['authorization'] = 'Bearer '.$tokenValue;
-        $headers['anthropic-beta'] = $request->header('anthropic-beta', 'claude-code-20250219,oauth-2025-04-20');
+        $requiredBeta = 'claude-code-20250219,oauth-2025-04-20';
+        $clientBeta = $request->header('anthropic-beta');
+        if ($clientBeta) {
+            // Merge client's beta flags with required OAuth flags, avoid duplicates
+            $flags = array_unique(array_merge(
+                explode(',', $requiredBeta),
+                explode(',', $clientBeta),
+            ));
+            $headers['anthropic-beta'] = implode(',', $flags);
+        } else {
+            $headers['anthropic-beta'] = $requiredBeta;
+        }
         $headers['user-agent'] = 'claude-cli/2.1.91 (external, cli)';
         $headers['x-app'] = 'cli';
 
