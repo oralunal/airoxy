@@ -17,10 +17,13 @@ class ServeCommand extends Command
 
         $this->info("Starting Airoxy on {$host}:{$port}...");
 
+        $adminPort = ((int) $port) + 1;
+
         return $this->call('octane:start', [
             '--server' => 'frankenphp',
             '--host' => $host,
             '--port' => $port,
+            '--admin-port' => $adminPort,
         ]);
     }
 }
