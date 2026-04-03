@@ -206,13 +206,23 @@ class ProxyService
     private function buildProxyHeaders(Request $request, string $tokenValue): array
     {
         $headers = [
-            'x-api-key' => $tokenValue,
+            'content-type' => 'application/json',
             'anthropic-version' => $request->header('anthropic-version', config('airoxy.anthropic_version')),
         ];
 
-        $beta = $request->header('anthropic-beta');
-        if ($beta) {
-            $headers['anthropic-beta'] = $beta;
+        // OAuth tokens (sk-ant-oat*) require Bearer auth + extra headers
+        if (str_starts_with($tokenValue, 'sk-ant-oat')) {
+            $headers['authorization'] = 'Bearer '.$tokenValue;
+            $headers['anthropic-beta'] = $request->header('anthropic-beta', 'oauth-2025-04-20');
+            $headers['user-agent'] = 'airoxy/1.0';
+            $headers['x-app'] = 'cli';
+        } else {
+            $headers['x-api-key'] = $tokenValue;
+
+            $beta = $request->header('anthropic-beta');
+            if ($beta) {
+                $headers['anthropic-beta'] = $beta;
+            }
         }
 
         return $headers;
