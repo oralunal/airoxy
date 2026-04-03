@@ -5,7 +5,7 @@ return [
     'host' => env('AIROXY_HOST', '0.0.0.0'),
     'port' => env('AIROXY_PORT', 3800),
 
-    'anthropic_api_url' => 'https://api.anthropic.com/v1/messages',
+    'anthropic_api_url' => 'https://api.anthropic.com/v1/messages?beta=true',
     'anthropic_version' => '2023-06-01',
 
     'token_refresh_interval' => env('AIROXY_TOKEN_REFRESH_INTERVAL', 360),

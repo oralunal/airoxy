@@ -44,11 +44,12 @@ class ProxyService
             }
 
             $proxyHeaders = $this->buildProxyHeaders($request, $accessToken->token);
+            $forwardBody = $this->prepareRequestBody($rawBody, $parsed, $accessToken->token);
 
             if ($isStream) {
-                $result = $this->handleStreamingRequest($rawBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
+                $result = $this->handleStreamingRequest($forwardBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
             } else {
-                $result = $this->handleNonStreamingRequest($rawBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
+                $result = $this->handleNonStreamingRequest($forwardBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
             }
 
             if ($result instanceof Response && in_array($result->getStatusCode(), [429, 529])) {
@@ -201,6 +202,44 @@ class ProxyService
     }
 
     /**
+     * For OAuth tokens, inject the required Claude Code system prompt if not present.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    private function prepareRequestBody(string $rawBody, array $parsed, string $tokenValue): string
+    {
+        if (! str_starts_with($tokenValue, 'sk-ant-oat')) {
+            return $rawBody;
+        }
+
+        $systemPrompt = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+        if (! isset($parsed['system'])) {
+            $parsed['system'] = [['type' => 'text', 'text' => $systemPrompt]];
+
+            return json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        // Check if system prompt already contains the required text
+        $systemContent = is_string($parsed['system']) ? $parsed['system'] : json_encode($parsed['system']);
+        if (str_contains($systemContent, 'Claude Code')) {
+            return $rawBody;
+        }
+
+        // Prepend to existing system
+        if (is_string($parsed['system'])) {
+            $parsed['system'] = [
+                ['type' => 'text', 'text' => $systemPrompt],
+                ['type' => 'text', 'text' => $parsed['system']],
+            ];
+        } elseif (is_array($parsed['system'])) {
+            array_unshift($parsed['system'], ['type' => 'text', 'text' => $systemPrompt]);
+        }
+
+        return json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
      * @return array<string, string>
      */
     private function buildProxyHeaders(Request $request, string $tokenValue): array
@@ -208,8 +247,8 @@ class ProxyService
         $headers['content-type'] = 'application/json';
         $headers['anthropic-version'] = $request->header('anthropic-version', config('airoxy.anthropic_version'));
         $headers['authorization'] = 'Bearer '.$tokenValue;
-        $headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
-        $headers['user-agent'] = 'claude-cli/2.1.62';
+        $headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24';
+        $headers['user-agent'] = 'claude-cli/2.1.91 (external, cli)';
         $headers['x-app'] = 'cli';
 
         return $headers;

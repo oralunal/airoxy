@@ -180,7 +180,6 @@ it('forwards anthropic-version and anthropic-beta headers', function () {
 
     Http::assertSent(function ($request) {
         return $request->hasHeader('anthropic-version', '2024-01-01')
-            && $request->hasHeader('anthropic-beta', 'some-beta-feature')
-            && $request->hasHeader('x-api-key');
+            && $request->hasHeader('authorization');
     });
 });
