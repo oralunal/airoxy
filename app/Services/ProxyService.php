@@ -247,7 +247,7 @@ class ProxyService
         $headers['content-type'] = 'application/json';
         $headers['anthropic-version'] = $request->header('anthropic-version', config('airoxy.anthropic_version'));
         $headers['authorization'] = 'Bearer '.$tokenValue;
-        $headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24';
+        $headers['anthropic-beta'] = $request->header('anthropic-beta', 'claude-code-20250219,oauth-2025-04-20');
         $headers['user-agent'] = 'claude-cli/2.1.91 (external, cli)';
         $headers['x-app'] = 'cli';
 
