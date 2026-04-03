@@ -180,8 +180,8 @@ airoxy/
 | status_code | integer | |
 | error_message | text, nullable | |
 | duration_ms | integer | |
-| requested_at | timestamp | |
-| created_at | timestamp | Explicit `$table->timestamp()`, no `updated_at` (append-only) |
+| requested_at | timestamp | When the client request arrived |
+| created_at | timestamp | When the log row was inserted (after proxy completes). No `updated_at` (append-only) |
 
 **Retention:** Rows older than 3 days are purged daily by a scheduled task, after aggregation.
 
@@ -337,7 +337,7 @@ return response()->stream(function () use ($upstream, &$logData) {
 6. If all keys exhausted, return last error to client
 ```
 
-Uses `DB::transaction()` for atomicity. SQLite serializes write transactions, so concurrent requests naturally take turns. The `usage_order` column serves as tiebreaker when multiple keys have the same `last_used_at` (e.g. all null on first use): keys are ordered by `last_used_at ASC, usage_order ASC`.
+Uses `DB::transaction()` for atomicity. SQLite serializes write transactions, so concurrent requests naturally take turns. **Important:** SQLite's `busy_timeout` must be set to a reasonable value (e.g. 5000ms) in `config/database.php` to avoid `SQLITE_BUSY` errors under concurrent load. Without this, the default 0ms timeout causes immediate failures. The `usage_order` column serves as tiebreaker when multiple keys have the same `last_used_at` (e.g. all null on first use): keys are ordered by `last_used_at ASC, usage_order ASC`.
 
 ---
 
@@ -538,6 +538,7 @@ command=/bin/bash -c "while true; do php /var/www/airoxy/artisan schedule:run --
 autostart=true
 autorestart=true
 user=www-data
+stopwaitsecs=10
 ```
 
 ---
