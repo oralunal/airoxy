@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AccessToken;
 use App\Models\ApiKey;
 use App\Models\RequestLog;
+use GuzzleHttp\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -112,19 +113,21 @@ class ProxyService
         string $model,
         Carbon $requestedAt,
     ): Response {
-        $response = Http::withHeaders($proxyHeaders)
-            ->connectTimeout(10)
-            ->withOptions([
-                'stream' => true,
-                'read_timeout' => 300,
-            ])
-            ->withBody($rawBody, 'application/json')
-            ->post(config('airoxy.anthropic_api_url'));
+        // Use Guzzle directly to avoid Laravel HTTP client buffering the stream
+        $client = new Client;
+        $guzzleResponse = $client->post(config('airoxy.anthropic_api_url'), [
+            'headers' => $proxyHeaders,
+            'body' => $rawBody,
+            'stream' => true,
+            'http_errors' => false,
+            'connect_timeout' => 10,
+            'read_timeout' => 300,
+        ]);
 
-        $statusCode = $response->status();
+        $statusCode = $guzzleResponse->getStatusCode();
 
         if ($statusCode >= 400) {
-            $body = $response->body();
+            $body = $guzzleResponse->getBody()->getContents();
             $responseBody = json_decode($body, true) ?: [];
 
             $this->logRequest(
@@ -141,19 +144,19 @@ class ProxyService
                 errorMessage: $responseBody['error']['message'] ?? null,
             );
 
-            $responseHeaders = $this->forwardResponseHeaders($response);
-
-            return response($body, $statusCode)->withHeaders($responseHeaders);
+            return response($body, $statusCode, [
+                'Content-Type' => 'application/json',
+            ]);
         }
 
-        $responseHeaders = array_merge($this->forwardResponseHeaders($response), [
+        $responseHeaders = [
             'Content-Type' => 'text/event-stream',
             'Cache-Control' => 'no-cache, no-store, must-revalidate',
             'Connection' => 'keep-alive',
             'X-Accel-Buffering' => 'no',
-        ]);
+        ];
         $proxyService = $this;
-        $streamBody = $response->getBody();
+        $streamBody = $guzzleResponse->getBody();
 
         return new StreamedResponse(function () use ($streamBody, $proxyService, $apiKey, $accessToken, $model, $requestedAt) {
             $streamHandler = app()->make(StreamHandler::class);
