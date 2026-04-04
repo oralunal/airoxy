@@ -5,6 +5,8 @@
     delaycompress
     missingok
     notifempty
+    dateext
+    dateformat -%Y%m
     create 0644 www-data www-data
 }
 
@@ -15,5 +17,7 @@
     delaycompress
     missingok
     notifempty
+    dateext
+    dateformat -%Y%m
     create 0644 www-data www-data
 }

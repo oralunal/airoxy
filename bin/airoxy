@@ -255,6 +255,15 @@ do_doctor() {
         check_ok "Global alias"
     fi
 
+    # Logrotate
+    if [ ! -f /etc/logrotate.d/airoxy ]; then
+        check_fix "Logrotate config missing — installing..."
+        cp "$AIROXY_PATH/logrotate/airoxy" /etc/logrotate.d/airoxy
+        FIXED=$((FIXED + 1))
+    else
+        check_ok "Logrotate"
+    fi
+
     # Summary
     echo ""
     echo -e "${GREEN}========================================${NC}"
