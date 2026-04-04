@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\AccessToken;
 use App\Models\ApiKey;
 use App\Models\RequestLog;
-use GuzzleHttp\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -113,98 +112,78 @@ class ProxyService
         string $model,
         Carbon $requestedAt,
     ): Response {
-        // Use Guzzle directly to avoid Laravel HTTP client buffering the stream
-        $client = new Client;
-        $guzzleResponse = $client->post(config('airoxy.anthropic_api_url'), [
-            'headers' => $proxyHeaders,
-            'body' => $rawBody,
-            'stream' => true,
-            'http_errors' => false,
-            'connect_timeout' => 10,
-            'read_timeout' => 300,
-        ]);
-
-        $statusCode = $guzzleResponse->getStatusCode();
-
-        if ($statusCode >= 400) {
-            $body = $guzzleResponse->getBody()->getContents();
-            $responseBody = json_decode($body, true) ?: [];
-
-            $this->logRequest(
-                apiKey: $apiKey,
-                accessToken: $accessToken,
-                model: $model,
-                statusCode: $statusCode,
-                isStream: true,
-                inputTokens: null,
-                outputTokens: null,
-                cacheCreationInputTokens: null,
-                cacheReadInputTokens: null,
-                requestedAt: $requestedAt,
-                errorMessage: $responseBody['error']['message'] ?? null,
-            );
-
-            return response($body, $statusCode, [
-                'Content-Type' => 'application/json',
-            ]);
-        }
-
-        $responseHeaders = [
-            'Content-Type' => 'text/event-stream',
-            'Cache-Control' => 'no-cache, no-store, must-revalidate',
-            'Connection' => 'keep-alive',
-            'X-Accel-Buffering' => 'no',
-        ];
+        $streamHandler = app()->make(StreamHandler::class);
         $proxyService = $this;
-        $streamBody = $guzzleResponse->getBody();
 
-        return new StreamedResponse(function () use ($streamBody, $proxyService, $apiKey, $accessToken, $model, $requestedAt) {
-            // Kill ALL output buffers — critical for real-time SSE
+        return new StreamedResponse(function () use ($rawBody, $proxyHeaders, $proxyService, $streamHandler, $apiKey, $accessToken, $model, $requestedAt) {
+            // Kill ALL output buffers
             while (ob_get_level() > 0) {
                 ob_end_clean();
             }
-
-            // Disable implicit flush buffering
-            @ini_set('output_buffering', '0');
-            @ini_set('zlib.output_compression', '0');
-            @ini_set('implicit_flush', '1');
-
-            $streamHandler = app()->make(StreamHandler::class);
+            ob_implicit_flush(true);
 
             $errorMessage = null;
+            $statusCode = 200;
 
-            try {
-                while (! $streamBody->eof()) {
-                    if (connection_aborted()) {
-                        $errorMessage = 'Client disconnected';
-                        break;
+            // Use native curl — CURLOPT_WRITEFUNCTION fires immediately per chunk
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => config('airoxy.anthropic_api_url'),
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $rawBody,
+                CURLOPT_HTTPHEADER => array_map(
+                    fn ($k, $v) => "{$k}: {$v}",
+                    array_keys($proxyHeaders),
+                    array_values($proxyHeaders),
+                ),
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 600,
+                CURLOPT_RETURNTRANSFER => false,
+                CURLOPT_HEADER => false,
+                CURLOPT_HEADERFUNCTION => function ($ch, $header) use (&$statusCode) {
+                    if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $m)) {
+                        $statusCode = (int) $m[1];
                     }
 
-                    $chunk = $streamBody->read(1);
-                    if ($chunk === '') {
-                        break;
+                    return strlen($header);
+                },
+                CURLOPT_WRITEFUNCTION => function ($ch, $data) use ($streamHandler, &$statusCode, &$errorMessage) {
+                    if ($statusCode >= 400) {
+                        $decoded = json_decode($data, true);
+                        $errorMessage = $decoded['error']['message'] ?? $data;
+
+                        return strlen($data);
                     }
 
-                    // Read remaining available data without blocking
-                    $remaining = $streamBody->read(65536);
-                    if ($remaining !== '') {
-                        $chunk .= $remaining;
-                    }
-
-                    echo $chunk;
+                    // Write directly to output — no buffering
+                    echo $data;
                     flush();
 
-                    $streamHandler->parseSSEChunk($chunk);
-                }
-            } catch (\Throwable $e) {
-                $errorMessage = $e->getMessage();
+                    $streamHandler->parseSSEChunk($data);
+
+                    if (connection_aborted()) {
+                        $errorMessage = 'Client disconnected';
+
+                        return 0; // Abort curl transfer
+                    }
+
+                    return strlen($data);
+                },
+            ]);
+
+            curl_exec($ch);
+
+            if (curl_errno($ch) && ! $errorMessage) {
+                $errorMessage = curl_error($ch);
             }
+
+            curl_close($ch);
 
             $proxyService->logRequest(
                 apiKey: $apiKey,
                 accessToken: $accessToken,
                 model: $model,
-                statusCode: 200,
+                statusCode: $statusCode,
                 isStream: true,
                 inputTokens: $streamHandler->getInputTokens(),
                 outputTokens: $streamHandler->getOutputTokens(),
@@ -213,7 +192,12 @@ class ProxyService
                 requestedAt: $requestedAt,
                 errorMessage: $errorMessage,
             );
-        }, 200, $responseHeaders);
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Connection' => 'keep-alive',
+            'X-Accel-Buffering' => 'no',
+        ]);
     }
 
     /**
