@@ -105,6 +105,7 @@ Access tokens are OAuth tokens that Airoxy uses to call Anthropic. Multiple toke
 |---------|-------------|
 | `sudo airoxy update` | Pull latest code, install deps, migrate, restart |
 | `sudo airoxy doctor` | Check system health and auto-fix issues |
+| `sudo airoxy uninstall` | Remove Airoxy completely (with confirmation) |
 
 #### Doctor Checks
 

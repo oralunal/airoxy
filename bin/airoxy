@@ -273,6 +273,56 @@ do_doctor() {
     echo ""
 }
 
+# ─── Uninstall ─────────────────────────────────────────────
+
+do_uninstall() {
+    require_root
+
+    echo -e "${RED}=== Airoxy Uninstall ===${NC}"
+    echo ""
+    echo -e "${YELLOW}This will remove:${NC}"
+    echo "  - Supervisor processes (airoxy, airoxy-scheduler)"
+    echo "  - Supervisor config (/etc/supervisor/conf.d/airoxy.conf)"
+    echo "  - Global alias (/usr/local/bin/airoxy)"
+    echo "  - Application directory ($AIROXY_PATH)"
+    echo "  - Log directory (/var/log/airoxy)"
+    echo ""
+
+    read -p "Are you sure? (y/N): " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo "Cancelled."
+        exit 0
+    fi
+
+    echo ""
+
+    echo -e "${YELLOW}[1/4] Stopping services...${NC}"
+    supervisorctl stop airoxy 2>/dev/null || true
+    supervisorctl stop airoxy-scheduler 2>/dev/null || true
+    echo "  Services stopped"
+
+    echo -e "${YELLOW}[2/4] Removing Supervisor config...${NC}"
+    rm -f /etc/supervisor/conf.d/airoxy.conf
+    supervisorctl reread 2>/dev/null || true
+    supervisorctl update 2>/dev/null || true
+    echo "  Config removed"
+
+    echo -e "${YELLOW}[3/4] Removing global alias...${NC}"
+    rm -f /usr/local/bin/airoxy
+    echo "  Alias removed"
+
+    echo -e "${YELLOW}[4/4] Removing application...${NC}"
+    rm -rf "$AIROXY_PATH"
+    rm -rf /var/log/airoxy
+    echo "  Application removed"
+
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}  Airoxy uninstalled successfully.${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+}
+
 # ─── Main Router ───────────────────────────────────────────
 
 case "${1:-}" in
@@ -282,6 +332,9 @@ case "${1:-}" in
     doctor)
         do_doctor
         ;;
+    uninstall)
+        do_uninstall
+        ;;
     "")
         echo "Usage: airoxy <command> [options]"
         echo ""
@@ -289,7 +342,8 @@ case "${1:-}" in
         echo "  serve                Start the proxy server"
         echo "  update               Pull latest code and restart"
         echo "  doctor               Check and fix system health"
-        echo "  api-key:add          Add an Anthropic API key"
+        echo "  uninstall            Remove Airoxy completely"
+        echo "  api-key:add          Create a new API key"
         echo "  api-key:list         List API keys"
         echo "  api-key:remove       Remove an API key"
         echo "  api-key:toggle       Toggle API key active/inactive"
