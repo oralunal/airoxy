@@ -37,7 +37,7 @@ airoxy api-key:add --name="My App"
 # => ak-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (shown once)
 
 # 4. Start the server
-sudo supervisorctl start airoxy
+sudo airoxy start
 ```
 
 Your client can now send requests to `http://your-server:3800/v1/messages` with the generated API key.
@@ -57,11 +57,14 @@ AIROXY_LOG_RETENTION_DAYS=3  # Days to keep detailed logs
 
 All commands are available via the `airoxy` global alias. System commands (`update`, `doctor`) require root.
 
-### Server
+### Service
 
 | Command | Description |
 |---------|-------------|
-| `airoxy serve` | Start the proxy server (reads host/port from .env) |
+| `sudo airoxy start` | Start Airoxy services |
+| `sudo airoxy stop` | Stop Airoxy services |
+| `sudo airoxy restart` | Restart Airoxy services |
+| `airoxy status` | Show service status |
 
 ### API Keys (Client Authentication)
 

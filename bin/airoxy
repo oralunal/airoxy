@@ -336,6 +336,35 @@ do_uninstall() {
 # ─── Main Router ───────────────────────────────────────────
 
 case "${1:-}" in
+    start)
+        require_root
+        if supervisorctl status airoxy 2>/dev/null | grep -q "RUNNING"; then
+            echo -e "${YELLOW}Airoxy is already running.${NC}"
+        else
+            supervisorctl start airoxy 2>/dev/null || true
+            supervisorctl start airoxy-scheduler 2>/dev/null || true
+            echo -e "${GREEN}Airoxy started.${NC}"
+        fi
+        ;;
+    stop)
+        require_root
+        if supervisorctl status airoxy 2>/dev/null | grep -q "STOPPED\|FATAL\|EXITED"; then
+            echo -e "${YELLOW}Airoxy is already stopped.${NC}"
+        else
+            supervisorctl stop airoxy 2>/dev/null || true
+            supervisorctl stop airoxy-scheduler 2>/dev/null || true
+            echo -e "${GREEN}Airoxy stopped.${NC}"
+        fi
+        ;;
+    restart)
+        require_root
+        supervisorctl restart airoxy 2>/dev/null || true
+        supervisorctl restart airoxy-scheduler 2>/dev/null || true
+        echo -e "${GREEN}Airoxy restarted.${NC}"
+        ;;
+    status)
+        supervisorctl status airoxy airoxy-scheduler 2>/dev/null
+        ;;
     update)
         do_update
         ;;
@@ -348,20 +377,31 @@ case "${1:-}" in
     "")
         echo "Usage: airoxy <command> [options]"
         echo ""
-        echo "Commands:"
-        echo "  serve                Start the proxy server"
+        echo "Service:"
+        echo "  start                Start Airoxy services"
+        echo "  stop                 Stop Airoxy services"
+        echo "  restart              Restart Airoxy services"
+        echo "  status               Show service status"
+        echo ""
+        echo "Management:"
         echo "  update               Pull latest code and restart"
         echo "  doctor               Check and fix system health"
         echo "  uninstall            Remove Airoxy completely"
+        echo ""
+        echo "API Keys:"
         echo "  api-key:add          Create a new API key"
         echo "  api-key:list         List API keys"
         echo "  api-key:remove       Remove an API key"
         echo "  api-key:toggle       Toggle API key active/inactive"
+        echo ""
+        echo "Access Tokens:"
         echo "  token:add            Add an access token"
         echo "  token:list           List access tokens"
         echo "  token:remove         Remove an access token"
         echo "  token:refresh        Refresh tokens via OAuth2"
         echo "  token:auto           Auto-import from credentials files"
+        echo ""
+        echo "Monitoring:"
         echo "  logs                 Show request logs"
         echo "  stats                Show usage statistics"
         ;;
