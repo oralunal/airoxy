@@ -43,9 +43,8 @@ do_update() {
 
     echo -e "${YELLOW}[1/5] Pulling latest code...${NC}"
     git config --global --add safe.directory "$AIROXY_PATH" 2>/dev/null || true
-    git checkout -- . 2>/dev/null || true
-    git clean -fd 2>/dev/null || true
-    git pull
+    git fetch origin
+    git reset --hard origin/main
     echo ""
 
     echo -e "${YELLOW}[2/5] Installing dependencies...${NC}"
