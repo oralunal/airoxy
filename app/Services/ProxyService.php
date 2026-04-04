@@ -159,6 +159,16 @@ class ProxyService
         $streamBody = $guzzleResponse->getBody();
 
         return new StreamedResponse(function () use ($streamBody, $proxyService, $apiKey, $accessToken, $model, $requestedAt) {
+            // Kill ALL output buffers — critical for real-time SSE
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Disable implicit flush buffering
+            @ini_set('output_buffering', '0');
+            @ini_set('zlib.output_compression', '0');
+            @ini_set('implicit_flush', '1');
+
             $streamHandler = app()->make(StreamHandler::class);
 
             $errorMessage = null;
@@ -170,16 +180,18 @@ class ProxyService
                         break;
                     }
 
-                    $chunk = $streamBody->read(8192);
+                    $chunk = $streamBody->read(1);
                     if ($chunk === '') {
                         break;
                     }
 
-                    echo $chunk;
-
-                    if (ob_get_level() > 0) {
-                        ob_flush();
+                    // Read remaining available data without blocking
+                    $remaining = $streamBody->read(65536);
+                    if ($remaining !== '') {
+                        $chunk .= $remaining;
                     }
+
+                    echo $chunk;
                     flush();
 
                     $streamHandler->parseSSEChunk($chunk);
