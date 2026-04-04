@@ -28,23 +28,44 @@ if ! grep -qi ubuntu /etc/os-release 2>/dev/null; then
     exit 1
 fi
 
-# Check PHP version
+APT_UPDATED=0
+
+# Check/install git
+if ! command -v git &>/dev/null; then
+    echo "  Installing Git..."
+    apt-get update -qq && APT_UPDATED=1
+    apt-get install -y -qq git
+fi
+echo "  Git ✓"
+
+# Check/install PHP 8.5+
 PHP_MAJOR=$(php -r 'echo PHP_MAJOR_VERSION;' 2>/dev/null || echo "0")
 PHP_MINOR=$(php -r 'echo PHP_MINOR_VERSION;' 2>/dev/null || echo "0")
 if [ "$PHP_MAJOR" -lt 8 ] || { [ "$PHP_MAJOR" -eq 8 ] && [ "$PHP_MINOR" -lt 5 ]; }; then
-    echo -e "${RED}Error: PHP 8.5+ is required (found: ${PHP_MAJOR}.${PHP_MINOR}).${NC}"
-    exit 1
+    echo "  Installing PHP 8.5..."
+    if [ "$APT_UPDATED" -eq 0 ]; then apt-get update -qq && APT_UPDATED=1; fi
+    apt-get install -y -qq software-properties-common
+    add-apt-repository -y ppa:ondrej/php
+    apt-get update -qq
+    apt-get install -y -qq php8.5-cli php8.5-curl php8.5-mbstring php8.5-sqlite3 php8.5-xml php8.5-zip
+    PHP_MAJOR=8
+    PHP_MINOR=5
 fi
 PHP_VERSION="${PHP_MAJOR}.${PHP_MINOR}"
 echo "  PHP $PHP_VERSION ✓"
 
 # Check PHP extensions
+MISSING_EXTS=""
 for ext in curl mbstring sqlite3 openssl tokenizer xml; do
     if ! php -m | grep -qi "^$ext$"; then
-        echo -e "${RED}Error: PHP extension '$ext' is missing.${NC}"
-        exit 1
+        MISSING_EXTS="$MISSING_EXTS php${PHP_VERSION}-$ext"
     fi
 done
+if [ -n "$MISSING_EXTS" ]; then
+    echo "  Installing missing PHP extensions..."
+    if [ "$APT_UPDATED" -eq 0 ]; then apt-get update -qq && APT_UPDATED=1; fi
+    apt-get install -y -qq $MISSING_EXTS
+fi
 echo "  PHP extensions ✓"
 
 # Check/install composer
@@ -57,16 +78,10 @@ echo "  Composer ✓"
 # Check/install supervisor
 if ! command -v supervisorctl &>/dev/null; then
     echo "  Installing Supervisor..."
-    apt-get update -qq && apt-get install -y -qq supervisor
+    if [ "$APT_UPDATED" -eq 0 ]; then apt-get update -qq && APT_UPDATED=1; fi
+    apt-get install -y -qq supervisor
 fi
 echo "  Supervisor ✓"
-
-# Check git
-if ! command -v git &>/dev/null; then
-    echo -e "${RED}Error: git is required.${NC}"
-    exit 1
-fi
-echo "  Git ✓"
 
 # 2. Clone & setup
 echo ""
@@ -128,7 +143,7 @@ echo -e "${GREEN}  Airoxy installed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "  Next steps:"
-echo "    1. Add API keys:    airoxy api-key:add YOUR_KEY --name='Key 1'"
+echo "    1. Add API keys:    airoxy api-key:add --name='Key 1'"
 echo "    2. Add tokens:      airoxy token:auto"
 echo "    3. Start server:    supervisorctl start airoxy"
 echo ""
