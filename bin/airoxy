@@ -63,6 +63,7 @@ do_update() {
 
     echo -e "${YELLOW}[5/5] Restarting services...${NC}"
     cp "$AIROXY_PATH/supervisor/airoxy-worker.conf" /etc/supervisor/conf.d/airoxy.conf
+    cp "$AIROXY_PATH/logrotate/airoxy" /etc/logrotate.d/airoxy 2>/dev/null || true
     cp "$AIROXY_PATH/bin/airoxy" /usr/local/bin/airoxy
     chmod +x /usr/local/bin/airoxy
     supervisorctl reread
@@ -307,9 +308,10 @@ do_uninstall() {
     supervisorctl update 2>/dev/null || true
     echo "  Config removed"
 
-    echo -e "${YELLOW}[3/4] Removing global alias...${NC}"
+    echo -e "${YELLOW}[3/4] Removing global alias and logrotate...${NC}"
     rm -f /usr/local/bin/airoxy
-    echo "  Alias removed"
+    rm -f /etc/logrotate.d/airoxy
+    echo "  Alias and logrotate removed"
 
     echo -e "${YELLOW}[4/4] Removing application...${NC}"
     rm -rf "$AIROXY_PATH"

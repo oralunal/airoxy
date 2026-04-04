@@ -134,7 +134,9 @@ mkdir -p /var/log/airoxy
 cp "$INSTALL_PATH/supervisor/airoxy-worker.conf" /etc/supervisor/conf.d/airoxy.conf
 supervisorctl reread
 supervisorctl update
+cp "$INSTALL_PATH/logrotate/airoxy" /etc/logrotate.d/airoxy
 echo "  Supervisor configured ✓"
+echo "  Logrotate configured ✓"
 
 # 7. Summary
 echo ""
