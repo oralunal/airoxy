@@ -45,8 +45,8 @@ it('increments fail count on refresh failure', function () {
 
     $token = AccessToken::create([
         'name' => 'Test',
-        'token' => 'old-token',
-        'refresh_token' => 'old-refresh',
+        'token' => 'sk-ant-oat01-old-token',
+        'refresh_token' => 'sk-ant-ort01-old-refresh',
         'token_expires_at' => now()->subHour(),
         'refresh_fail_count' => 0,
     ]);
@@ -81,8 +81,8 @@ it('deactivates token after 3 consecutive failures', function () {
 
     $token = AccessToken::create([
         'name' => 'Test',
-        'token' => 'old-token',
-        'refresh_token' => 'old-refresh',
+        'token' => 'sk-ant-oat01-old-token-2',
+        'refresh_token' => 'sk-ant-ort01-old-refresh-2',
         'token_expires_at' => now()->subHour(),
         'refresh_fail_count' => 2,
     ]);

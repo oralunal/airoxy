@@ -17,8 +17,8 @@ beforeEach(function () {
 
     $this->accessToken = AccessToken::create([
         'name' => 'Token 1',
-        'token' => 'sk-ant-api03-test',
-        'refresh_token' => 'test-refresh',
+        'token' => 'sk-ant-oat01-test',
+        'refresh_token' => 'sk-ant-ort01-test',
         'is_active' => true,
         'token_expires_at' => now()->addDay(),
         'usage_order' => 1,
@@ -78,7 +78,15 @@ it('logs the request after proxying', function () {
         ->and($log->access_token_id)->toBe($this->accessToken->id);
 });
 
-it('forwards the raw body without modification', function () {
+it('forwards the raw body without modification for API key tokens', function () {
+    $this->accessToken->delete();
+    AccessToken::create([
+        'name' => 'API Key Token',
+        'token' => 'sk-ant-api03-test-key',
+        'is_active' => true,
+        'usage_order' => 1,
+    ]);
+
     Http::fake([
         'api.anthropic.com/*' => Http::response(['id' => 'msg_123', 'type' => 'message', 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]),
     ]);
@@ -115,8 +123,8 @@ it('forwards Anthropic error responses with correct status code', function () {
 it('retries with next access token on 429', function () {
     $token2 = AccessToken::create([
         'name' => 'Token 2',
-        'token' => 'sk-ant-api03-test-2',
-        'refresh_token' => 'test-refresh-2',
+        'token' => 'sk-ant-oat01-test-2',
+        'refresh_token' => 'sk-ant-ort01-test-2',
         'is_active' => true,
         'token_expires_at' => now()->addDay(),
         'usage_order' => 2,

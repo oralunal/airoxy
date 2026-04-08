@@ -39,8 +39,7 @@ it('lists tokens with masked values', function () {
 it('removes a token by ID', function () {
     $token = AccessToken::create([
         'name' => 'Test',
-        'token' => 'test-token',
-        'refresh_token' => 'test-refresh',
+        'token' => 'sk-ant-api03-test-token',
     ]);
 
     $this->artisan('airoxy:token:remove', ['id' => $token->id])
