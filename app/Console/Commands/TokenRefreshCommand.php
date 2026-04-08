@@ -23,6 +23,12 @@ class TokenRefreshCommand extends Command
                 return self::FAILURE;
             }
 
+            if ($token->isApiKey()) {
+                $this->warn("Token ID {$id} is not an OAuth token — skipping refresh.");
+
+                return self::SUCCESS;
+            }
+
             $result = $refresher->refresh($token);
             $this->info($result ? 'Token refreshed successfully.' : 'Token refresh failed.');
 

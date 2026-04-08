@@ -60,6 +60,20 @@ it('increments fail count on refresh failure', function () {
         ->and($token->is_active)->toBeTrue();
 });
 
+it('skips API key tokens in refreshAll', function () {
+    AccessToken::create([
+        'name' => 'API Key',
+        'token' => 'sk-ant-api03-test',
+        'is_active' => true,
+    ]);
+
+    $refresher = new TokenRefresher;
+    $result = $refresher->refreshAll();
+
+    expect($result['refreshed'])->toBe(0)
+        ->and($result['failed'])->toBe(0);
+});
+
 it('deactivates token after 3 consecutive failures', function () {
     Http::fake([
         'platform.claude.com/*' => Http::response(['error' => 'invalid_grant'], 400),
