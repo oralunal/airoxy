@@ -26,17 +26,21 @@ This clones the repo to `/var/www/airoxy`, installs dependencies, sets up Franke
 ## Quick Start
 
 ```bash
-# 1. Add an access token (Anthropic OAuth token)
-airoxy token:add sk-ant-oat01-xxx sk-ant-ort01-xxx --name="My Token"
+# 1. Add an access token
+#    Standard API key:
+airoxy token:add sk-ant-api03-xxx --name="API Key"
 
-# 2. Or auto-import from Claude Code credentials
+#    Or OAuth token (Claude subscription):
+airoxy token:add sk-ant-oat01-xxx sk-ant-ort01-xxx --name="OAuth Token"
+
+#    Or auto-import OAuth tokens from Claude Code credentials:
 airoxy token:auto
 
-# 3. Create an API key for your client
+# 2. Create an API key for your client
 airoxy api-key:add --name="My App"
 # => ak-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (shown once)
 
-# 4. Start the server
+# 3. Start the server
 sudo airoxy start
 ```
 
@@ -79,15 +83,20 @@ API keys are what your clients use to authenticate with Airoxy. They are auto-ge
 
 ### Access Tokens (Anthropic Authentication)
 
-Access tokens are OAuth tokens that Airoxy uses to call Anthropic. Multiple tokens are rotated via round-robin. Tokens are refreshed automatically every 6 hours.
+Airoxy supports two token types, auto-detected from the prefix:
+
+- **API keys** (`sk-ant-api03-*`): Transparent proxy — `x-api-key` header, no modifications
+- **OAuth tokens** (`sk-ant-oat-*`): Subscription proxy — Bearer auth, automatic refresh every 6 hours
+
+Both types participate in the same round-robin pool.
 
 | Command | Description |
 |---------|-------------|
-| `airoxy token:add {token} {refresh_token} --name= --expires-in=28800` | Add a token manually |
-| `airoxy token:auto --dry-run --path=` | Auto-import from `~/.claude/.credentials.json` files |
-| `airoxy token:list` | List all tokens (masked) |
+| `airoxy token:add {token} {refresh_token?} --name= --expires-in=28800` | Add a token (refresh_token required for OAuth only) |
+| `airoxy token:auto --dry-run --path=` | Auto-import OAuth tokens from `~/.claude/.credentials.json` |
+| `airoxy token:list` | List all tokens (masked, with type) |
 | `airoxy token:remove {id}` | Delete a token |
-| `airoxy token:refresh --id=` | Refresh one or all tokens via OAuth2 |
+| `airoxy token:refresh --id=` | Refresh OAuth tokens via OAuth2 |
 
 ### Logs & Statistics
 
@@ -106,7 +115,7 @@ Access tokens are OAuth tokens that Airoxy uses to call Anthropic. Multiple toke
 
 | Command | Description |
 |---------|-------------|
-| `sudo airoxy update` | Pull latest code, install deps, migrate, restart |
+| `sudo airoxy update` | Update to latest release, migrate, restart |
 | `sudo airoxy doctor` | Check system health and auto-fix issues |
 | `sudo airoxy uninstall` | Remove Airoxy completely (with confirmation) |
 
@@ -157,17 +166,23 @@ curl -N http://your-server:3800/v1/messages \
 
 ## How It Works
 
+### Token Types
+
+**API keys** (`sk-ant-api03-*`) get a fully transparent proxy: requests are forwarded with `x-api-key` header, no body or header modifications. Client headers like `anthropic-beta` and `anthropic-version` are passed through as-is.
+
+**OAuth tokens** (`sk-ant-oat-*`) use subscription-specific auth: `Authorization: Bearer` header, required beta flags, and Claude Code system prompt injection. This allows using Claude Pro/Max subscriptions as an API.
+
 ### Transparent Proxy
 
-Request body is forwarded byte-for-byte to Anthropic. Airoxy only reads `model` and `stream` fields for logging. All Anthropic parameters (tools, thinking, metadata, etc.) pass through transparently.
+Request body is forwarded byte-for-byte to Anthropic (for API key tokens) or with minimal modifications (for OAuth tokens). Airoxy only reads `model` and `stream` fields for logging. All Anthropic parameters (tools, thinking, metadata, etc.) pass through transparently.
 
 ### Round-Robin Token Rotation
 
-When multiple access tokens are configured, Airoxy selects the least recently used active token for each request. If a token returns 429 (rate limit) or 529 (overloaded), the next token is tried automatically.
+When multiple access tokens are configured, Airoxy selects the least recently used active token for each request. If a token returns 429 (rate limit) or 529 (overloaded), the next token is tried automatically. Both API key and OAuth tokens participate in the same pool.
 
 ### OAuth2 Token Refresh
 
-Access tokens are refreshed automatically every 6 hours (configurable). After 3 consecutive refresh failures, a token is deactivated. `airoxy token:auto` imports tokens from Claude Code credential files on the server.
+OAuth tokens are refreshed automatically every 6 hours (configurable). After 3 consecutive refresh failures, a token is deactivated. API key tokens do not expire and are not refreshed. `airoxy token:auto` imports OAuth tokens from Claude Code credential files on the server.
 
 ### Cost Estimation
 
