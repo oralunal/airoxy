@@ -43,8 +43,8 @@ class ProxyService
                 ], 503);
             }
 
-            $proxyHeaders = $this->buildProxyHeaders($request, $accessToken->token);
-            $forwardBody = $this->prepareRequestBody($rawBody, $parsed, $accessToken->token);
+            $proxyHeaders = $this->buildProxyHeaders($request, $accessToken);
+            $forwardBody = $this->prepareRequestBody($rawBody, $parsed, $accessToken);
 
             if ($isStream) {
                 $result = $this->handleStreamingRequest($forwardBody, $proxyHeaders, $apiKey, $accessToken, $model, $requestedAt);
@@ -205,9 +205,9 @@ class ProxyService
      *
      * @param  array<string, mixed>  $parsed
      */
-    private function prepareRequestBody(string $rawBody, array $parsed, string $tokenValue): string
+    private function prepareRequestBody(string $rawBody, array $parsed, AccessToken $accessToken): string
     {
-        if (! str_starts_with($tokenValue, 'sk-ant-oat')) {
+        if (! $accessToken->isOauth()) {
             return $rawBody;
         }
 
@@ -241,25 +241,39 @@ class ProxyService
     /**
      * @return array<string, string>
      */
-    private function buildProxyHeaders(Request $request, string $tokenValue): array
+    private function buildProxyHeaders(Request $request, AccessToken $accessToken): array
     {
         $headers['content-type'] = 'application/json';
-        $headers['anthropic-version'] = $request->header('anthropic-version', config('airoxy.anthropic_version'));
-        $headers['authorization'] = 'Bearer '.$tokenValue;
-        $requiredBeta = 'claude-code-20250219,oauth-2025-04-20';
-        $clientBeta = $request->header('anthropic-beta');
-        if ($clientBeta) {
-            // Merge client's beta flags with required OAuth flags, avoid duplicates
-            $flags = array_unique(array_merge(
-                explode(',', $requiredBeta),
-                explode(',', $clientBeta),
-            ));
-            $headers['anthropic-beta'] = implode(',', $flags);
+
+        if ($accessToken->isOauth()) {
+            $headers['anthropic-version'] = $request->header('anthropic-version', config('airoxy.anthropic_version'));
+            $headers['authorization'] = 'Bearer '.$accessToken->token;
+
+            $requiredBeta = 'claude-code-20250219,oauth-2025-04-20';
+            $clientBeta = $request->header('anthropic-beta');
+            if ($clientBeta) {
+                $flags = array_unique(array_merge(
+                    explode(',', $requiredBeta),
+                    explode(',', $clientBeta),
+                ));
+                $headers['anthropic-beta'] = implode(',', $flags);
+            } else {
+                $headers['anthropic-beta'] = $requiredBeta;
+            }
+
+            $headers['user-agent'] = 'claude-cli/2.1.91 (external, cli)';
+            $headers['x-app'] = 'cli';
         } else {
-            $headers['anthropic-beta'] = $requiredBeta;
+            $headers['x-api-key'] = $accessToken->token;
+
+            if ($version = $request->header('anthropic-version')) {
+                $headers['anthropic-version'] = $version;
+            }
+
+            if ($beta = $request->header('anthropic-beta')) {
+                $headers['anthropic-beta'] = $beta;
+            }
         }
-        $headers['user-agent'] = 'claude-cli/2.1.91 (external, cli)';
-        $headers['x-app'] = 'cli';
 
         return $headers;
     }

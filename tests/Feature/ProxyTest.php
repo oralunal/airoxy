@@ -163,6 +163,131 @@ it('returns error when no access tokens available', function () {
     $response->assertStatus(503);
 });
 
+it('sends x-api-key header for API key tokens', function () {
+    $this->accessToken->delete();
+    AccessToken::create([
+        'name' => 'API Key Token',
+        'token' => 'sk-ant-api03-test-key',
+        'is_active' => true,
+        'usage_order' => 1,
+    ]);
+
+    Http::fake([
+        'api.anthropic.com/*' => Http::response([
+            'id' => 'msg_123',
+            'type' => 'message',
+            'content' => [['type' => 'text', 'text' => 'Hello!']],
+            'model' => 'claude-sonnet-4-6',
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5],
+        ]),
+    ]);
+
+    $this->postJson('/v1/messages', [
+        'model' => 'claude-sonnet-4-6',
+        'max_tokens' => 100,
+        'messages' => [['role' => 'user', 'content' => 'Hi']],
+    ], ['x-api-key' => 'test-api-key']);
+
+    Http::assertSent(function ($request) {
+        return $request->hasHeader('x-api-key', 'sk-ant-api03-test-key')
+            && ! $request->hasHeader('authorization');
+    });
+});
+
+it('does not modify body for API key tokens', function () {
+    $this->accessToken->delete();
+    AccessToken::create([
+        'name' => 'API Key Token',
+        'token' => 'sk-ant-api03-test-key',
+        'is_active' => true,
+        'usage_order' => 1,
+    ]);
+
+    Http::fake([
+        'api.anthropic.com/*' => Http::response([
+            'id' => 'msg_123',
+            'type' => 'message',
+            'usage' => ['input_tokens' => 0, 'output_tokens' => 0],
+        ]),
+    ]);
+
+    $rawBody = '{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[{"role":"user","content":"Hi"}]}';
+
+    $this->call('POST', '/v1/messages', [], [], [], [
+        'HTTP_X_API_KEY' => 'test-api-key',
+        'CONTENT_TYPE' => 'application/json',
+    ], $rawBody);
+
+    Http::assertSent(function ($request) use ($rawBody) {
+        return $request->body() === $rawBody;
+    });
+});
+
+it('forwards client anthropic-beta as-is for API key tokens', function () {
+    $this->accessToken->delete();
+    AccessToken::create([
+        'name' => 'API Key Token',
+        'token' => 'sk-ant-api03-test-key',
+        'is_active' => true,
+        'usage_order' => 1,
+    ]);
+
+    Http::fake([
+        'api.anthropic.com/*' => Http::response([
+            'id' => 'msg_123',
+            'type' => 'message',
+            'usage' => ['input_tokens' => 0, 'output_tokens' => 0],
+        ]),
+    ]);
+
+    $this->postJson('/v1/messages', [
+        'model' => 'claude-sonnet-4-6',
+        'max_tokens' => 100,
+        'messages' => [['role' => 'user', 'content' => 'Hi']],
+    ], [
+        'x-api-key' => 'test-api-key',
+        'anthropic-beta' => 'custom-beta-flag',
+    ]);
+
+    Http::assertSent(function ($request) {
+        return $request->hasHeader('anthropic-beta', 'custom-beta-flag');
+    });
+});
+
+it('sends Authorization Bearer for OAuth tokens', function () {
+    $this->accessToken->delete();
+    AccessToken::create([
+        'name' => 'OAuth Token',
+        'token' => 'sk-ant-oat01-test-oauth',
+        'refresh_token' => 'sk-ant-ort01-test',
+        'is_active' => true,
+        'token_expires_at' => now()->addDay(),
+        'usage_order' => 1,
+    ]);
+
+    Http::fake([
+        'api.anthropic.com/*' => Http::response([
+            'id' => 'msg_123',
+            'type' => 'message',
+            'content' => [['type' => 'text', 'text' => 'Hello!']],
+            'model' => 'claude-sonnet-4-6',
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5],
+        ]),
+    ]);
+
+    $this->postJson('/v1/messages', [
+        'model' => 'claude-sonnet-4-6',
+        'max_tokens' => 100,
+        'messages' => [['role' => 'user', 'content' => 'Hi']],
+    ], ['x-api-key' => 'test-api-key']);
+
+    Http::assertSent(function ($request) {
+        return $request->hasHeader('authorization', 'Bearer sk-ant-oat01-test-oauth')
+            && $request->hasHeader('anthropic-beta')
+            && str_contains($request->header('anthropic-beta')[0], 'oauth-2025-04-20');
+    });
+});
+
 it('forwards anthropic-version and anthropic-beta headers', function () {
     Http::fake([
         'api.anthropic.com/*' => Http::response(['id' => 'msg_123', 'type' => 'message', 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]),
