@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Re-exec from memory to survive self-update (bin/airoxy gets overwritten during update)
+if [ -z "$AIROXY_REEXEC" ]; then
+    export AIROXY_REEXEC=1
+    exec bash <(cat "$0") "$@"
+fi
+
 AIROXY_PATH="/var/www/airoxy"
 
 GREEN='\033[0;32m'
