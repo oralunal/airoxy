@@ -14,6 +14,7 @@ return new class extends Migration
     {
         Schema::table('access_tokens', function (Blueprint $table) {
             $table->string('type')->default('oauth')->after('name');
+            $table->text('refresh_token')->nullable()->change();
         });
 
         // Backfill: mark any non-OAuth tokens as api_key
