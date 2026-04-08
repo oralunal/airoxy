@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TokenType;
 use App\Models\AccessToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -44,6 +45,47 @@ it('removes a token by ID', function () {
 
     $this->artisan('airoxy:token:remove', ['id' => $token->id])
         ->assertExitCode(0);
+
+    expect(AccessToken::count())->toBe(0);
+});
+
+it('adds an API key token without refresh_token', function () {
+    $this->artisan('airoxy:token:add', [
+        'token' => 'sk-ant-api03-test-key',
+        '--name' => 'API Key',
+    ])->assertExitCode(0);
+
+    $token = AccessToken::first();
+    expect($token->type)->toBe(TokenType::ApiKey)
+        ->and($token->refresh_token)->toBeNull()
+        ->and($token->token_expires_at)->toBeNull();
+});
+
+it('auto-detects OAuth type from token prefix', function () {
+    $this->artisan('airoxy:token:add', [
+        'token' => 'sk-ant-oat01-test',
+        'refresh_token' => 'sk-ant-ort01-test',
+        '--name' => 'OAuth Token',
+    ])->assertExitCode(0);
+
+    $token = AccessToken::first();
+    expect($token->type)->toBe(TokenType::OAuth);
+});
+
+it('errors when OAuth token is added without refresh_token', function () {
+    $this->artisan('airoxy:token:add', [
+        'token' => 'sk-ant-oat01-test',
+        '--name' => 'Missing Refresh',
+    ])->assertExitCode(1);
+
+    expect(AccessToken::count())->toBe(0);
+});
+
+it('rejects tokens with unrecognized prefix', function () {
+    $this->artisan('airoxy:token:add', [
+        'token' => 'invalid-token-format',
+        '--name' => 'Bad Token',
+    ])->assertExitCode(1);
 
     expect(AccessToken::count())->toBe(0);
 });
