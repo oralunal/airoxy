@@ -89,12 +89,35 @@ echo -e "${YELLOW}[2/7] Cloning repository...${NC}"
 
 git config --global --add safe.directory "$INSTALL_PATH" 2>/dev/null || true
 
+REPO_URL="https://github.com/oralunal/airoxy.git"
+LATEST_TAG=$(git ls-remote --tags --sort=-v:refname "$REPO_URL" 'refs/tags/v*' 2>/dev/null | head -n 1 | sed 's|.*refs/tags/||')
+
+if [ -z "$LATEST_TAG" ]; then
+    echo -e "${YELLOW}  No release tags found. Using main branch.${NC}"
+    LATEST_TAG=""
+fi
+
 if [ -d "$INSTALL_PATH" ]; then
-    echo -e "${YELLOW}  $INSTALL_PATH already exists. Pulling latest...${NC}"
-    cd "$INSTALL_PATH" && git pull
-else
-    git clone https://github.com/oralunal/airoxy.git "$INSTALL_PATH"
+    echo -e "${YELLOW}  $INSTALL_PATH already exists. Updating...${NC}"
     cd "$INSTALL_PATH"
+    git fetch origin --tags
+    if [ -n "$LATEST_TAG" ]; then
+        git checkout "$LATEST_TAG" --force
+    else
+        git reset --hard origin/main
+    fi
+else
+    if [ -n "$LATEST_TAG" ]; then
+        echo "  Installing release ${LATEST_TAG}..."
+        git clone --branch "$LATEST_TAG" "$REPO_URL" "$INSTALL_PATH"
+    else
+        git clone "$REPO_URL" "$INSTALL_PATH"
+    fi
+    cd "$INSTALL_PATH"
+fi
+
+if [ -n "$LATEST_TAG" ]; then
+    echo "  Release: ${LATEST_TAG} ✓"
 fi
 
 echo ""
