@@ -22,10 +22,11 @@ class TokenListCommand extends Command
         }
 
         $this->table(
-            ['ID', 'Name', 'Token', 'Active', 'Expires', 'Fails', 'Last Used'],
+            ['ID', 'Name', 'Type', 'Token', 'Active', 'Expires', 'Fails', 'Last Used'],
             $tokens->map(fn (AccessToken $token) => [
                 $token->id,
                 $token->name ?? '-',
+                $token->type->value,
                 $token->masked_token,
                 $token->is_active ? 'Yes' : 'No',
                 $token->token_expires_at?->diffForHumans() ?? '-',
