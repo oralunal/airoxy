@@ -41,10 +41,27 @@ do_update() {
 
     cd "$AIROXY_PATH"
 
-    echo -e "${YELLOW}[1/5] Pulling latest code...${NC}"
+    echo -e "${YELLOW}[1/5] Fetching latest release...${NC}"
     git config --global --add safe.directory "$AIROXY_PATH" 2>/dev/null || true
-    git fetch origin
-    git reset --hard origin/main
+    git fetch origin --tags
+    LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+    if [ -z "$LATEST_TAG" ]; then
+        echo -e "${RED}No release tags found. Falling back to main branch.${NC}"
+        git reset --hard origin/main
+    else
+        CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "none")
+        if [ "$CURRENT_TAG" = "$LATEST_TAG" ]; then
+            echo -e "${GREEN}Already on latest release: ${LATEST_TAG}${NC}"
+            echo ""
+            echo -e "${GREEN}========================================${NC}"
+            echo -e "${GREEN}  Airoxy is already up to date.${NC}"
+            echo -e "${GREEN}========================================${NC}"
+            echo ""
+            exit 0
+        fi
+        echo "  ${CURRENT_TAG} → ${LATEST_TAG}"
+        git checkout "$LATEST_TAG" --force
+    fi
     echo ""
 
     echo -e "${YELLOW}[2/5] Installing dependencies...${NC}"
@@ -384,7 +401,7 @@ case "${1:-}" in
         echo "  status               Show service status"
         echo ""
         echo "Management:"
-        echo "  update               Pull latest code and restart"
+        echo "  update               Update to latest release"
         echo "  doctor               Check and fix system health"
         echo "  uninstall            Remove Airoxy completely"
         echo ""
